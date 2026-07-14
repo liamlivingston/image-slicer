@@ -407,15 +407,25 @@ class ImageSlicerApp:
                        self.load_frames_for_animation
                        ).pack(fill=tk.X, padx=12, pady=(4, 2), ipady=2)
 
-        btn_row = tk.Frame(parent, bg=BG)
-        btn_row.pack(fill=tk.X, **pad)
-        for lbl, cmd in [("▲ Up",       self.move_frame_up),
-                         ("▼ Down",     self.move_frame_down),
-                         ("⇅ Reverse",  self.reverse_frame_order),
-                         ("↺ Reset",    self.reset_frame_order),
-                         ("❌ Clear",    self.clear_animation_frames)]:
-            ttk.Button(btn_row, text=lbl, command=cmd, width=8
-                       ).pack(side=tk.LEFT, padx=(0, 4))
+        order_grid = tk.Frame(parent, bg=BG)
+        order_grid.pack(fill=tk.X, **pad)
+        order_grid.columnconfigure((0, 1, 2), weight=1)
+        
+        buttons = [
+            ("▲ Move Up", self.move_frame_up),
+            ("▼ Move Down", self.move_frame_down),
+            ("🗑 Delete", self.delete_selected_frame),
+            ("⇅ Reverse", self.reverse_frame_order),
+            ("↺ Reset", self.reset_frame_order),
+            ("❌ Clear All", self.clear_animation_frames)
+        ]
+        
+        for idx, (lbl, cmd) in enumerate(buttons):
+            r = idx // 3
+            c = idx % 3
+            ttk.Button(order_grid, text=lbl, command=cmd).grid(
+                row=r, column=c, padx=2, pady=2, sticky="ew"
+            )
 
         # Timing
         self._section_label(parent, "Timing")
@@ -446,31 +456,30 @@ class ImageSlicerApp:
         bg_card = tk.Frame(parent, bg=CARD, padx=10, pady=8)
         bg_card.pack(fill=tk.X, **pad)
         bg_card.columnconfigure(1, weight=1)
-        self._dark_btn(bg_card, "🖼 Upload Background Image",
-                       self.browse_bg_image
-                       ).grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 4))
-        self.bg_label_var = tk.StringVar(value="No background selected")
-        tk.Label(bg_card, textvariable=self.bg_label_var,
-                 bg=CARD, fg=SUBTEXT, font=("Helvetica", 8, "italic"),
-                 wraplength=280, justify=tk.LEFT
-                 ).grid(row=1, column=0, columnspan=2, sticky=tk.W, pady=(0, 6))
+        
         self.use_bg_var = tk.BooleanVar(value=False)
-        tk.Checkbutton(bg_card, text="Use Background Image",
+        tk.Checkbutton(bg_card, text="Use Background Frame",
                        variable=self.use_bg_var,
                        bg=CARD, fg=TEXT, selectcolor=SURFACE,
                        activebackground=CARD, activeforeground=ACCENT,
-                       font=("Helvetica", 9)
-                       ).grid(row=2, column=0, columnspan=2, sticky=tk.W, pady=2)
-        tk.Label(bg_card, text="Background Frame Index (1-based):",
+                       font=("Helvetica", 9),
+                       command=self.update_preview
+                       ).grid(row=0, column=0, columnspan=2, sticky=tk.W, pady=2)
+                       
+        tk.Label(bg_card, text="Background Frame Index:",
                  bg=CARD, fg=TEXT, font=("Helvetica", 9)
-                 ).grid(row=3, column=0, sticky=tk.W, pady=3)
+                 ).grid(row=1, column=0, sticky=tk.W, pady=3)
+                 
         self.bg_frame_index_var = tk.StringVar(value="1")
-        tk.Spinbox(bg_card, from_=1, to=999, increment=1,
-                   textvariable=self.bg_frame_index_var,
-                   bg=SURFACE, fg=TEXT, insertbackground=TEXT,
-                   buttonbackground=CARD, relief="flat",
-                   font=("Helvetica", 9), width=6
-                   ).grid(row=3, column=1, sticky=tk.W, padx=(8, 0), pady=3)
+        bg_spin = tk.Spinbox(bg_card, from_=1, to=999, increment=1,
+                    textvariable=self.bg_frame_index_var,
+                    bg=SURFACE, fg=TEXT, insertbackground=TEXT,
+                    buttonbackground=CARD, relief="flat",
+                    font=("Helvetica", 9), width=6,
+                    command=self.update_preview
+                    )
+        bg_spin.grid(row=1, column=1, sticky=tk.W, padx=(8, 0), pady=3)
+        bg_spin.bind("<KeyRelease>", lambda e: self.update_preview())
         tk.Label(bg_card,
                  text="Sprites are composited on the background per frame.",
                  bg=CARD, fg=SUBTEXT, font=("Helvetica", 8, "italic"),
@@ -799,15 +808,7 @@ class ImageSlicerApp:
             self.output_dir_var.set(directory)
 
     def browse_bg_image(self):
-        filename = filedialog.askopenfilename(
-            title="Select Background Image",
-            filetypes=(("Image files", "*.png *.jpg *.jpeg *.webp *.bmp *.tiff"),
-                       ("All files", "*.*")),
-            initialdir=os.getcwd()
-        )
-        if filename:
-            self.bg_image_path = filename
-            self.bg_label_var.set(os.path.basename(filename))
+        pass
 
     def browse_gif_output(self):
         filename = filedialog.asksaveasfilename(
@@ -1956,14 +1957,21 @@ class ImageSlicerApp:
             
         ordered_paths = ordered_paths[start - 1:end]
 
-        use_bg = self.use_bg_var.get() and bool(self.bg_image_path)
+        use_bg = self.use_bg_var.get() and len(self.animation_frames) > 0
 
         if use_bg:
             try:
-                background = Image.open(self.bg_image_path).convert("RGBA")
+                bg_idx = int(self.bg_frame_index_var.get())
+                if bg_idx < 1: bg_idx = 1
+                if bg_idx > len(self.animation_frames): bg_idx = len(self.animation_frames)
+            except ValueError:
+                bg_idx = 1
+            bg_path = self.animation_frames[self.animation_frame_order[bg_idx - 1]]
+            try:
+                background = Image.open(bg_path).convert("RGBA")
             except Exception as e:
                 messagebox.showerror("Error",
-                    f"Could not open background image:\n{self.bg_image_path}\n{e}")
+                    f"Could not open background frame image:\n{bg_path}\n{e}")
                 return
             bg_w, bg_h = background.size
             frames = []
@@ -2157,8 +2165,15 @@ class ImageSlicerApp:
             try:
                 frame_img = Image.open(frame_path).convert("RGBA")
                 
-                if self.use_bg_var.get() and self.bg_image_path:
-                    background = Image.open(self.bg_image_path).convert("RGBA")
+                if self.use_bg_var.get() and len(self.animation_frames) > 0:
+                    try:
+                        bg_idx = int(self.bg_frame_index_var.get())
+                        if bg_idx < 1: bg_idx = 1
+                        if bg_idx > len(self.animation_frames): bg_idx = len(self.animation_frames)
+                    except ValueError:
+                        bg_idx = 1
+                    bg_path = self.animation_frames[self.animation_frame_order[bg_idx - 1]]
+                    background = Image.open(bg_path).convert("RGBA")
                     bg_w, bg_h = background.size
                     comp = background.copy()
                     x = (bg_w - frame_img.width) // 2
@@ -2324,14 +2339,25 @@ class ImageSlicerApp:
             x2 = x1 + cell_w
             y2 = y1 + cell_h
             
-            self.storyboard_cells.append((x1, y1, x2, y2))
+            self.storyboard_cells.append({
+                "bbox": (x1, y1, x2, y2),
+                "del_bbox": (x2 - 25, y1 + 3, x2 - 3, y1 + 25),
+                "index": i
+            })
             
             try:
                 img = Image.open(frame_path).convert("RGBA")
                 
-                if self.use_bg_var.get() and self.bg_image_path:
+                if self.use_bg_var.get() and len(self.animation_frames) > 0:
                     try:
-                        bg = Image.open(self.bg_image_path).convert("RGBA")
+                        bg_idx = int(self.bg_frame_index_var.get())
+                        if bg_idx < 1: bg_idx = 1
+                        if bg_idx > len(self.animation_frames): bg_idx = len(self.animation_frames)
+                    except ValueError:
+                        bg_idx = 1
+                    bg_path = self.animation_frames[self.animation_frame_order[bg_idx - 1]]
+                    try:
+                        bg = Image.open(bg_path).convert("RGBA")
                         bg_w, bg_h = bg.size
                         comp = bg.copy()
                         bx = (bg_w - img.width) // 2
@@ -2368,6 +2394,16 @@ class ImageSlicerApp:
                     font=("Helvetica", 12, "bold")
                 )
                 
+                # Draw small delete '✕' button in top-right corner
+                self.canvas.create_oval(
+                    x2 - 22, y1 + 6, x2 - 6, y1 + 22,
+                    fill="#e94560", outline="#ffffff", width=1.5
+                )
+                self.canvas.create_text(
+                    x2 - 14, y1 + 14, text="✕", fill="white",
+                    font=("Helvetica", 9, "bold")
+                )
+                
                 # Draw border highlight if active
                 is_active = (i + 1 == self.current_anim_frame_idx)
                 outline_color = ACCENT if is_active else BORDER
@@ -2392,8 +2428,17 @@ class ImageSlicerApp:
         
         self.dragged_cell_idx = -1
         if hasattr(self, "storyboard_cells"):
-            for idx, bbox in enumerate(self.storyboard_cells):
-                x1, y1, x2, y2 = bbox
+            for cell in self.storyboard_cells:
+                idx = cell["index"]
+                
+                # Check delete button click first
+                dx1, dy1, dx2, dy2 = cell["del_bbox"]
+                if dx1 <= cx <= dx2 and dy1 <= cy <= dy2:
+                    self.delete_frame_by_index(idx)
+                    return
+                
+                # Check cell dragging click
+                x1, y1, x2, y2 = cell["bbox"]
                 if x1 <= cx <= x2 and y1 <= cy <= y2:
                     self.dragged_cell_idx = idx
                     self.drag_start_x = cx
@@ -2401,7 +2446,7 @@ class ImageSlicerApp:
                     break
                     
         if self.dragged_cell_idx != -1:
-            x1, y1, x2, y2 = self.storyboard_cells[self.dragged_cell_idx]
+            x1, y1, x2, y2 = self.storyboard_cells[self.dragged_cell_idx]["bbox"]
             self.drag_rect_id = self.canvas.create_rectangle(
                 x1, y1, x2, y2, outline=ACCENT, width=3
             )
@@ -2415,7 +2460,7 @@ class ImageSlicerApp:
         dx = cx - self.drag_start_x
         dy = cy - self.drag_start_y
         
-        x1, y1, x2, y2 = self.storyboard_cells[self.dragged_cell_idx]
+        x1, y1, x2, y2 = self.storyboard_cells[self.dragged_cell_idx]["bbox"]
         self.canvas.coords(self.drag_rect_id, x1 + dx, y1 + dy, x2 + dx, y2 + dy)
 
     def on_canvas_release(self, event):
@@ -2432,10 +2477,10 @@ class ImageSlicerApp:
         
         target_idx = -1
         if hasattr(self, "storyboard_cells"):
-            for idx, bbox in enumerate(self.storyboard_cells):
-                x1, y1, x2, y2 = bbox
+            for cell in self.storyboard_cells:
+                x1, y1, x2, y2 = cell["bbox"]
                 if x1 <= cx <= x2 and y1 <= cy <= y2:
-                    target_idx = idx
+                    target_idx = cell["index"]
                     break
                     
         if target_idx != -1 and target_idx != self.dragged_cell_idx:
