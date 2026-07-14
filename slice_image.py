@@ -130,6 +130,9 @@ class ImageSlicerApp:
         self.style.configure("Accent.TButton",    background=ACCENT, foreground="white",
                                                   font=("Helvetica", 10, "bold"), padding=8)
         self.style.map("Accent.TButton",          background=[("active", "#005ecb"), ("pressed", "#004b9b")])
+        self.style.configure("Stop.TButton",      background="#ff3b30", foreground="white",
+                                                  font=("Helvetica", 9, "bold"), padding=6)
+        self.style.map("Stop.TButton",            background=[("active", "#ff453a"), ("pressed", "#d6241a")])
         self.style.configure("Secondary.TButton", background=ACCENT2, foreground="white", padding=6)
         self.style.map("Secondary.TButton",       background=[("active", "#4745ab")])
         self.style.configure("TEntry",            fieldbackground=SURFACE, foreground=TEXT,
@@ -2057,7 +2060,7 @@ class ImageSlicerApp:
         self.preview_mode = "gif"
         self.is_playing_anim = True
         self.play_pause_btn.config(text="⏸")
-        self.preview_gif_btn.config(text="▶ Preview GIF", default="active")
+        self.preview_gif_btn.config(text="🛑 Stop Preview", style="Stop.TButton")
         self.canvas_img_id = None
         
         n = len(self.animation_frames)
@@ -2087,7 +2090,7 @@ class ImageSlicerApp:
 
     def stop_gif_preview(self):
         self.preview_mode = "storyboard"
-        self.preview_gif_btn.config(text="▶ Preview GIF", default="normal")
+        self.preview_gif_btn.config(text="▶ Preview GIF", style="TButton")
         
         if self.preview_gif_job:
             try:
@@ -2286,7 +2289,7 @@ class ImageSlicerApp:
                     pass
                 self.preview_gif_job = None
             self.preview_mode = "storyboard"
-            self.preview_gif_btn.config(text="▶ Preview GIF", default="normal")
+            self.preview_gif_btn.config(text="▶ Preview GIF", style="TButton")
             self.bottom_bar.grid_remove()
             self.timeline_frame.grid(row=2, column=0, sticky="ew")
             
