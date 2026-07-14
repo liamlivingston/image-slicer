@@ -2057,7 +2057,8 @@ class ImageSlicerApp:
         self.preview_mode = "gif"
         self.is_playing_anim = True
         self.play_pause_btn.config(text="⏸")
-        self.preview_gif_btn.config(text="🛑 Close Preview", default="active")
+        self.preview_gif_btn.config(text="▶ Preview GIF", default="active")
+        self.canvas_img_id = None
         
         n = len(self.animation_frames)
         self.range_start_spin.config(from_=1, to=n)
@@ -2110,8 +2111,12 @@ class ImageSlicerApp:
 
     def on_timeline_slide(self, val):
         self.current_anim_frame_idx = int(float(val))
-        if self.is_scrubbing or not self.is_playing_anim:
-            self.update_preview()
+        if self.preview_mode == "gif":
+            if self.is_scrubbing or not self.is_playing_anim:
+                self.draw_gif_frame()
+        else:
+            if self.is_scrubbing or not self.is_playing_anim:
+                self.update_preview()
 
     def on_slider_press(self):
         self.is_scrubbing = True
@@ -2194,17 +2199,24 @@ class ImageSlicerApp:
                 resized_img = frame_img.resize((nw, nh), resamp)
                 
                 self.preview_tk = ImageTk.PhotoImage(resized_img)
-                self.canvas.delete("all")
                 
                 canvas_w = max(cw, self.canvas.winfo_width())
                 canvas_h = max(ch, self.canvas.winfo_height())
                 dx = max(0, (canvas_w - nw) // 2)
                 dy = max(0, (canvas_h - nh) // 2)
                 
-                self.canvas.create_image(dx, dy, anchor=tk.NW, image=self.preview_tk)
+                cid = getattr(self, "canvas_img_id", None)
+                if cid is None or cid not in self.canvas.find_all():
+                    self.canvas.delete("all")
+                    self.canvas_img_id = self.canvas.create_image(dx, dy, anchor=tk.NW, image=self.preview_tk)
+                else:
+                    self.canvas.coords(self.canvas_img_id, dx, dy)
+                    self.canvas.itemconfig(self.canvas_img_id, image=self.preview_tk)
+                    
                 self.canvas.config(scrollregion=(0, 0, canvas_w, canvas_h))
             except Exception as e:
                 self.canvas.delete("all")
+                self.canvas_img_id = None
                 self.canvas.create_text(
                     self.canvas.winfo_width() // 2, self.canvas.winfo_height() // 2,
                     text=f"Error loading frame {self.current_anim_frame_idx}:\n{e}",
