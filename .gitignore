@@ -1,0 +1,32 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# OS Files
+.DS_Store
+Thumbs.db
+
+# Environments
+env/
+venv/
+packaging_env/
+.env
+
+# Installer/Build artifacts
+build/
+dist/
+dist 2/
+*.spec
+
+# Local sliced image outputs
+*_sliced/
+*sliced/
+sliced-images/
+*.jpg
+*.jpeg
+*.png
+
+# Archive files
+*.zip
+*.tar.gz
