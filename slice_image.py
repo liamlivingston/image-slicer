@@ -2299,6 +2299,46 @@ class ImageSlicerApp:
                 
             self.update_preview()
 
+    def delete_selected_frame(self):
+        sel = self.frame_listbox.curselection()
+        if not sel:
+            return
+        self.delete_frame_by_index(sel[0])
+
+    def delete_frame_by_index(self, index):
+        if 0 <= index < len(self.animation_frame_order):
+            self.animation_frame_order.pop(index)
+            self.refresh_frame_listbox()
+            
+            n = len(self.animation_frame_order)
+            if n > 0:
+                self.range_start_spin.config(from_=1, to=n)
+                self.range_end_spin.config(from_=1, to=n)
+                self.timeline_slider.config(from_=1.0, to=float(n))
+                
+                try:
+                    start = int(self.range_start_var.get())
+                except ValueError:
+                    start = 1
+                try:
+                    end = int(self.range_end_var.get())
+                except ValueError:
+                    end = n
+                start = max(1, min(n, start))
+                end = max(1, min(n, end))
+                if start > end: start = end
+                self.range_start_var.set(str(start))
+                self.range_end_var.set(str(end))
+                
+                if self.current_anim_frame_idx > n:
+                    self.current_anim_frame_idx = n
+            else:
+                self.current_anim_frame_idx = 1
+                self.range_start_var.set("1")
+                self.range_end_var.set("1")
+                
+            self.update_preview()
+
     def draw_storyboard_grid(self):
         self.canvas.delete("all")
         self.storyboard_cells = []
