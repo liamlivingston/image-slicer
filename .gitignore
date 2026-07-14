@@ -15,7 +15,6 @@ packaging_env/
 
 # Installer/Build artifacts
 build/
-dist/
 dist 2/
 *.spec
 
@@ -28,5 +27,4 @@ sliced-images/
 *.png
 
 # Archive files
-*.zip
 *.tar.gz
