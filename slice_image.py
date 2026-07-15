@@ -1186,6 +1186,166 @@ class ImageSlicerApp:
         img  = pil_img.convert("RGBA")
         W, H = img.size
 
+        # --- Crosshairs Grid Detection Pass ---
+        try:
+            pixels = img.convert("L")
+            dark_pixels = set()
+            for y in range(H):
+                for x in range(W):
+                    if pixels.getpixel((x, y)) < 80:
+                        dark_pixels.add((x, y))
+                        
+            # Flood fill to find blobs
+            visited = set()
+            candidates = []
+            for (x, y) in sorted(dark_pixels):
+                if (x, y) in visited:
+                    continue
+                blob = []
+                queue = [(x, y)]
+                visited.add((x, y))
+                while queue:
+                    cx, cy = queue.pop(0)
+                    blob.append((cx, cy))
+                    for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                        nx, ny = cx + dx, cy + dy
+                        if (nx, ny) in dark_pixels and (nx, ny) not in visited:
+                            visited.add((nx, ny))
+                            queue.append((nx, ny))
+                            
+                xs = [p[0] for p in blob]
+                ys = [p[1] for p in blob]
+                min_x, max_x = min(xs), max(xs)
+                min_y, max_y = min(ys), max(ys)
+                w = max_x - min_x + 1
+                h = max_y - min_y + 1
+                
+                # Filter blobs of crosshair sizes (e.g. 12x12 to 25x25 pixels)
+                if 12 <= w <= 25 and 12 <= h <= 25:
+                    if 25 <= len(blob) <= 60:
+                        aspect = w / h
+                        if 0.7 <= aspect <= 1.4:
+                            cx = (min_x + max_x) // 2
+                            cy = (min_y + max_y) // 2
+                            candidates.append({"cx": cx, "cy": cy, "w": w, "h": h})
+                            
+            if len(candidates) >= 4:
+                col_bins = []
+                for cand in candidates:
+                    placed = False
+                    for bin_list in col_bins:
+                        avg_x = sum(c["cx"] for c in bin_list) / len(bin_list)
+                        if abs(cand["cx"] - avg_x) < 30:
+                            bin_list.append(cand)
+                            placed = True
+                            break
+                    if not placed:
+                        col_bins.append([cand])
+                        
+                row_bins = []
+                for cand in candidates:
+                    placed = False
+                    for bin_list in row_bins:
+                        avg_y = sum(c["cy"] for c in bin_list) / len(bin_list)
+                        if abs(cand["cy"] - avg_y) < 30:
+                            bin_list.append(cand)
+                            placed = True
+                            break
+                    if not placed:
+                        row_bins.append([cand])
+                        
+                max_col = max(len(b) for b in col_bins) if col_bins else 0
+                max_row = max(len(b) for b in row_bins) if row_bins else 0
+                
+                if max_col >= 2 and max_row >= 2:
+                    min_col_crosses = max(2, max_col - 1) if max_col > 2 else 2
+                    min_row_crosses = max(2, max_row - 1) if max_row > 2 else 2
+                    
+                    robust_col_bins = [b for b in col_bins if len(b) >= min_col_crosses]
+                    robust_row_bins = [b for b in row_bins if len(b) >= min_row_crosses]
+                    
+                    valid_crosses = []
+                    for cand in candidates:
+                        in_col = any(abs(cand["cx"] - sum(c["cx"] for c in b)/len(b)) < 30 for b in robust_col_bins)
+                        in_row = any(abs(cand["cy"] - sum(c["cy"] for c in b)/len(b)) < 30 for b in robust_row_bins)
+                        if in_col and in_row:
+                            valid_crosses.append(cand)
+                            
+                    if len(valid_crosses) >= 4:
+                        final_cols = []
+                        for c in valid_crosses:
+                            placed = False
+                            for bin_list in final_cols:
+                                avg_x = sum(item["cx"] for item in bin_list) / len(bin_list)
+                                if abs(c["cx"] - avg_x) < 30:
+                                    bin_list.append(c)
+                                    placed = True
+                                    break
+                            if not placed:
+                                final_cols.append([c])
+                                
+                        final_rows = []
+                        for c in valid_crosses:
+                            placed = False
+                            for bin_list in final_rows:
+                                avg_y = sum(item["cy"] for item in bin_list) / len(bin_list)
+                                if abs(c["cy"] - avg_y) < 30:
+                                    bin_list.append(c)
+                                    placed = True
+                                    break
+                            if not placed:
+                                final_rows.append([c])
+                                
+                        col_centers = sorted([int(sum(c["cx"] for c in b) / len(b)) for b in final_cols])
+                        row_centers = sorted([int(sum(c["cy"] for c in b) / len(b)) for b in final_rows])
+                        
+                        if len(col_centers) >= 2 and len(row_centers) >= 2:
+                            avg_w = sum(c["w"] for c in valid_crosses) / len(valid_crosses)
+                            avg_h = sum(c["h"] for c in valid_crosses) / len(valid_crosses)
+                            
+                            border_x = int(avg_w)
+                            border_y = int(avg_h)
+                            
+                            avg_cell_w = (col_centers[-1] - col_centers[0]) / (len(col_centers) - 1)
+                            has_left = (col_centers[0] < avg_cell_w * 0.6)
+                            has_right = ((W - col_centers[-1]) < avg_cell_w * 0.6)
+                            
+                            avg_cell_h = (row_centers[-1] - row_centers[0]) / (len(row_centers) - 1)
+                            has_top = (row_centers[0] < avg_cell_h * 0.6)
+                            has_bottom = ((H - row_centers[-1]) < avg_cell_h * 0.6)
+                            
+                            if has_left and has_right:
+                                layout = "all"
+                                cols = len(col_centers) - 1
+                            elif not has_left and not has_right:
+                                layout = "between"
+                                cols = len(col_centers) + 1
+                            else:
+                                layout = "all"
+                                cols = len(col_centers)
+                                
+                            if has_top and has_bottom:
+                                rows = len(row_centers) - 1
+                            elif not has_top and not has_bottom:
+                                rows = len(row_centers) + 1
+                            else:
+                                rows = len(row_centers)
+                                
+                            col_groups = [list(range(cx - border_x//2, cx + border_x//2 + 1)) for cx in col_centers]
+                            row_groups = [list(range(cy - border_y//2, cy + border_y//2 + 1)) for cy in row_centers]
+                            
+                            return {
+                                "cols": cols,
+                                "rows": rows,
+                                "border_x": border_x,
+                                "border_y": border_y,
+                                "layout": layout,
+                                "col_groups": col_groups,
+                                "row_groups": row_groups
+                            }
+        except Exception:
+            pass  # Fallback to standard color gap detection if anything fails
+
         def check_col(x):
             sample_y = [0, H // 4, H // 2, 3 * H // 4, H - 1]
             samples  = [img.getpixel((x, y)) for y in sample_y]
