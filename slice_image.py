@@ -80,6 +80,14 @@ class ImageSlicerApp:
         self.storyboard_photos        = []
         self.dragged_cell_idx         = -1
 
+        # Sprite Extractor variables
+        self.extracted_sprite_img     = None
+        self.extract_source_var       = tk.StringVar()
+        self.extract_mode_var         = tk.StringVar(value="color")
+        self.extract_bg_var           = tk.StringVar()
+        self.extract_color_var        = tk.StringVar(value="#ffffff")
+        self.extract_tol_var          = tk.DoubleVar(value=30.0)
+
         # Apply light style
         self.apply_light_style()
 
@@ -203,15 +211,15 @@ class ImageSlicerApp:
 
         self.tab_slice    = tk.Frame(self.notebook, bg=BG)
         self.tab_animate  = tk.Frame(self.notebook, bg=BG)
-        self.tab_settings = tk.Frame(self.notebook, bg=BG)
+        self.tab_extract  = tk.Frame(self.notebook, bg=BG)
 
         self.notebook.add(self.tab_slice,    text="✂ Slice")
         self.notebook.add(self.tab_animate,  text="🎬 Animate")
-        self.notebook.add(self.tab_settings, text="⚙ Settings")
+        self.notebook.add(self.tab_extract,  text="🧪 Extract")
 
         self._build_slice_tab(self.tab_slice)
         self._build_animate_tab(self.tab_animate)
-        self._build_settings_tab(self.tab_settings)
+        self._build_extract_tab(self.tab_extract)
 
         # Recursively bind MouseWheel events to all children of self.notebook
         def bind_mousewheel_recursive(widget):
@@ -511,20 +519,107 @@ class ImageSlicerApp:
     # -----------------------------------------------------------------------
     # TAB 3: SETTINGS
     # -----------------------------------------------------------------------
-    def _build_settings_tab(self, parent):
-        card = tk.Frame(parent, bg=CARD, padx=14, pady=14)
-        card.pack(fill=tk.X, padx=12, pady=(18, 8))
-        tk.Label(card, text="⚙  Settings coming soon...",
-                 bg=CARD, fg=ACCENT, font=("Helvetica", 12, "bold")
-                 ).pack(anchor=tk.W, pady=(0, 8))
-        tk.Label(card, bg=CARD, fg=SUBTEXT, font=("Helvetica", 9), justify=tk.LEFT,
-                 text=(
-                     "Future options:\n"
-                     "  • Default output format\n"
-                     "  • Detection sensitivity\n"
-                     "  • Preview quality\n"
-                     "  • Keyboard shortcuts"
-                 )).pack(anchor=tk.W)
+    def _build_extract_tab(self, parent):
+        pad = dict(padx=12, pady=4)
+        
+        # Source Image Section
+        self._section_label(parent, "Source Image (Frame)")
+        row_f = tk.Frame(parent, bg=BG)
+        row_f.pack(fill=tk.X, **pad)
+        self._dark_entry(row_f, self.extract_source_var, width=26).pack(
+            side=tk.LEFT, fill=tk.X, expand=True, ipady=4)
+        self._dark_btn(row_f, "Browse…", self.browse_extract_source).pack(
+            side=tk.LEFT, padx=(6, 0))
+            
+        # Key Mode Section
+        self._section_label(parent, "Keying Mode")
+        mode_frame = tk.Frame(parent, bg=BG)
+        mode_frame.pack(fill=tk.X, **pad)
+        
+        r1 = ttk.Radiobutton(mode_frame, text="Solid Color Key", variable=self.extract_mode_var, value="color", command=self.on_extract_mode_changed)
+        r1.pack(side=tk.LEFT, padx=(0, 20))
+        r2 = ttk.Radiobutton(mode_frame, text="Difference Key", variable=self.extract_mode_var, value="diff", command=self.on_extract_mode_changed)
+        r2.pack(side=tk.LEFT)
+        
+        # Color Key Panel (Container)
+        self.color_key_container = tk.Frame(parent, bg=BG)
+        self.color_key_container.pack(fill=tk.X, **pad)
+        
+        tk.Label(self.color_key_container, text="Key Color:", bg=BG, fg=TEXT, font=("Helvetica", 9)).pack(side=tk.LEFT, padx=(0, 6))
+        self.color_entry = self._dark_entry(self.color_key_container, self.extract_color_var, width=10)
+        self.color_entry.pack(side=tk.LEFT, padx=(0, 6))
+        
+        self._dark_btn(self.color_key_container, "Pick Color…", self.pick_key_color).pack(side=tk.LEFT)
+        
+        # Difference Key Panel (Container)
+        self.diff_key_container = tk.Frame(parent, bg=BG)
+        
+        tk.Label(self.diff_key_container, text="Reference BG:", bg=BG, fg=TEXT, font=("Helvetica", 9)).pack(side=tk.LEFT, padx=(0, 6))
+        self._dark_entry(self.diff_key_container, self.extract_bg_var, width=18).pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=4)
+        self._dark_btn(self.diff_key_container, "Browse…", self.browse_extract_bg).pack(side=tk.LEFT, padx=(6, 0))
+        
+        # Settings Card
+        self._section_label(parent, "Settings")
+        settings_card = tk.Frame(parent, bg=CARD, padx=14, pady=14)
+        settings_card.pack(fill=tk.X, padx=12, pady=(8, 8))
+        
+        # Tolerance Slider
+        tol_row = tk.Frame(settings_card, bg=CARD)
+        tol_row.pack(fill=tk.X, pady=4)
+        tk.Label(tol_row, text="Color Tolerance (1-255):", bg=CARD, fg=TEXT, font=("Helvetica", 9)).pack(side=tk.LEFT)
+        
+        self.tol_scale = tk.Scale(
+            settings_card, from_=1, to=255, orient=tk.HORIZONTAL,
+            variable=self.extract_tol_var, bg=CARD, fg=TEXT,
+            highlightbackground=CARD, activebackground=ACCENT,
+            troughcolor=BG, relief="flat", font=("Helvetica", 9)
+        )
+        self.tol_scale.pack(fill=tk.X, pady=(0, 8))
+        
+        # Action Buttons
+        self._section_label(parent, "Actions")
+        btn_row = tk.Frame(parent, bg=BG)
+        btn_row.pack(fill=tk.X, **pad)
+        
+        self._dark_btn(btn_row, "👀 Preview Sprite", self.preview_extracted_sprite).pack(fill=tk.X, pady=4)
+        self._dark_btn(btn_row, "💾 Save Sprite (PNG)", self.save_extracted_sprite, default="active").pack(fill=tk.X, pady=4)
+        
+        self.on_extract_mode_changed()
+
+    def on_extract_mode_changed(self):
+        mode = self.extract_mode_var.get()
+        if mode == "color":
+            self.diff_key_container.pack_forget()
+            self.color_key_container.pack(fill=tk.X, padx=12, pady=4)
+        else:
+            self.color_key_container.pack_forget()
+            self.diff_key_container.pack(fill=tk.X, padx=12, pady=4)
+
+    def browse_extract_source(self):
+        filename = filedialog.askopenfilename(
+            title="Select Source Frame Image",
+            filetypes=(("Image files", "*.png *.jpg *.jpeg *.webp *.bmp *.tiff"),
+                       ("All files", "*.*")),
+            initialdir=os.getcwd()
+        )
+        if filename:
+            self.extract_source_var.set(filename)
+            
+    def browse_extract_bg(self):
+        filename = filedialog.askopenfilename(
+            title="Select Reference Background Image",
+            filetypes=(("Image files", "*.png *.jpg *.jpeg *.webp *.bmp *.tiff"),
+                       ("All files", "*.*")),
+            initialdir=os.getcwd()
+        )
+        if filename:
+            self.extract_bg_var.set(filename)
+            
+    def pick_key_color(self):
+        from tkinter import colorchooser
+        color_code = colorchooser.askcolor(title="Choose Key Color")
+        if color_code and color_code[1]:
+            self.extract_color_var.set(color_code[1])
 
     # -----------------------------------------------------------------------
     # BUILD RIGHT PANEL
@@ -740,6 +835,9 @@ class ImageSlicerApp:
         if self.preview_mode == "gif":
             self.draw_gif_frame()
             return
+        if self.preview_mode == "extract":
+            self.draw_extract_preview()
+            return
         if self.original_img:
             self.rescale_preview_image()
             self.update_preview()
@@ -853,6 +951,9 @@ class ImageSlicerApp:
             return
         if self.preview_mode == "gif":
             self.draw_gif_frame()
+            return
+        if self.preview_mode == "extract":
+            self.draw_extract_preview()
             return
         if not self.original_img:
             self.draw_placeholder()
@@ -2461,6 +2562,17 @@ class ImageSlicerApp:
                 self.timeline_slider.config(from_=1.0, to=float(n))
                 
             self.update_preview()
+        elif tab_idx == 2:  # Extract tab
+            if self.preview_gif_job:
+                try:
+                    self.root.after_cancel(self.preview_gif_job)
+                except Exception:
+                    pass
+                self.preview_gif_job = None
+            self.preview_mode = "extract"
+            self.timeline_frame.grid_remove()
+            self.bottom_bar.grid_remove()
+            self.update_preview()
 
     def delete_selected_frame(self):
         sel = self.frame_listbox.curselection()
@@ -2705,6 +2817,142 @@ class ImageSlicerApp:
             self.update_preview()
             
         self.dragged_cell_idx = -1
+
+    # -----------------------------------------------------------------------
+    # SPRITE EXTRACTOR METHODS
+    # -----------------------------------------------------------------------
+    def extract_sprite_logic(self):
+        source_path = self.extract_source_var.get().strip()
+        if not source_path or not os.path.exists(source_path):
+            messagebox.showerror("Error", "Please select a valid source frame image first.")
+            return None
+            
+        try:
+            src_img = Image.open(source_path).convert("RGBA")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to load source image:\n{e}")
+            return None
+            
+        tol = int(self.extract_tol_var.get())
+        mode = self.extract_mode_var.get()
+        
+        from PIL import ImageChops
+        
+        if mode == "color":
+            color_hex = self.extract_color_var.get().strip().lstrip('#')
+            if len(color_hex) != 6:
+                messagebox.showerror("Error", "Key color must be a valid 6-character hex string (e.g. #FFFFFF).")
+                return None
+            try:
+                target_r = int(color_hex[0:2], 16)
+                target_g = int(color_hex[2:4], 16)
+                target_b = int(color_hex[4:6], 16)
+            except ValueError:
+                messagebox.showerror("Error", "Invalid key color format.")
+                return None
+                
+            r, g, b, a = src_img.split()
+            dr = r.point(lambda p: abs(p - target_r))
+            dg = g.point(lambda p: abs(p - target_g))
+            db = b.point(lambda p: abs(p - target_b))
+            dist = ImageChops.add(ImageChops.add(dr, dg), db)
+            mask = dist.point(lambda p: 0 if p <= tol else 255)
+            new_a = ImageChops.darker(a, mask)
+            extracted = Image.merge("RGBA", (r, g, b, new_a))
+            return extracted
+            
+        elif mode == "diff":
+            bg_path = self.extract_bg_var.get().strip()
+            if not bg_path or not os.path.exists(bg_path):
+                messagebox.showerror("Error", "Please select a valid reference background image first.")
+                return None
+            try:
+                bg_img = Image.open(bg_path).convert("RGBA")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to load background image:\n{e}")
+                return None
+                
+            if bg_img.size != src_img.size:
+                resamp = Image.Resampling.LANCZOS if hasattr(Image, "Resampling") else Image.ANTIALIAS
+                bg_img = bg_img.resize(src_img.size, resamp)
+                
+            sr, sg, sb, sa = src_img.split()
+            br, bg, bb, ba = bg_img.split()
+            dr = ImageChops.difference(sr, br)
+            dg = ImageChops.difference(sg, bg)
+            db = ImageChops.difference(sb, bb)
+            dist = ImageChops.add(ImageChops.add(dr, dg), db)
+            mask = dist.point(lambda p: 0 if p <= tol else 255)
+            new_a = ImageChops.darker(sa, mask)
+            extracted = Image.merge("RGBA", (sr, sg, sb, new_a))
+            return extracted
+            
+        return None
+
+    def preview_extracted_sprite(self):
+        extracted = self.extract_sprite_logic()
+        if extracted:
+            self.extracted_sprite_img = extracted
+            self.preview_mode = "extract"
+            self.update_preview()
+            
+    def save_extracted_sprite(self):
+        extracted = self.extract_sprite_logic()
+        if not extracted:
+            return
+            
+        filename = filedialog.asksaveasfilename(
+            title="Save Extracted Sprite",
+            defaultextension=".png",
+            filetypes=[("PNG files", "*.png"), ("All files", "*.*")],
+            initialdir=os.getcwd()
+        )
+        if filename:
+            try:
+                extracted.save(filename, "PNG")
+                messagebox.showinfo("Success", f"Extracted sprite saved successfully to:\n{filename}")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to save sprite:\n{e}")
+
+    def create_checkerboard(self, width, height, tile_size=12):
+        bg = Image.new("RGBA", (width, height), "#ffffff")
+        draw = ImageDraw.Draw(bg)
+        for y in range(0, height, tile_size):
+            for x in range(0, width, tile_size):
+                if ((x // tile_size) + (y // tile_size)) % 2 == 1:
+                    draw.rectangle([x, y, x + tile_size, y + tile_size], fill="#d1d1d6")
+        return bg
+
+    def draw_extract_preview(self):
+        if not self.extracted_sprite_img:
+            return
+        cw = self.canvas_container.winfo_width()
+        ch = self.canvas_container.winfo_height()
+        if cw < 100: cw = 600
+        if ch < 100: ch = 500
+        
+        fw, fh = self.extracted_sprite_img.size
+        scale = min(cw / fw, ch / fh, 1.0)
+        nw, nh = max(1, int(fw * scale)), max(1, int(fh * scale))
+        
+        resamp = Image.Resampling.LANCZOS if hasattr(Image, "Resampling") else Image.ANTIALIAS
+        resized_img = self.extracted_sprite_img.resize((nw, nh), resamp)
+        
+        checkerboard = self.create_checkerboard(nw, nh)
+        preview_img = Image.new("RGBA", (nw, nh))
+        preview_img.paste(checkerboard, (0, 0))
+        preview_img.paste(resized_img, (0, 0), resized_img)
+        
+        self.preview_tk = ImageTk.PhotoImage(preview_img)
+        self.canvas.delete("all")
+        
+        canvas_w = max(cw, self.canvas.winfo_width())
+        canvas_h = max(ch, self.canvas.winfo_height())
+        dx = max(0, (canvas_w - nw) // 2)
+        dy = max(0, (canvas_h - nh) // 2)
+        
+        self.canvas.create_image(dx, dy, anchor=tk.NW, image=self.preview_tk)
+        self.canvas.config(scrollregion=(0, 0, canvas_w, canvas_h))
 
 
 # ---------------------------------------------------------------------------
