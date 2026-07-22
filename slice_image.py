@@ -1490,7 +1490,7 @@ class ImageSlicerApp:
                             abs(ref[2] - p[2]) + abs(ref[3] - p[3]))
                 if dist > color_tolerance * 1.5:
                     return False, None
-            pixels = [img.getpixel((x, y)) for y in range(W)]
+            pixels = [img.getpixel((x, y)) for x in range(W)]
             r_sorted = sorted(p[0] for p in pixels)
             g_sorted = sorted(p[1] for p in pixels)
             b_sorted = sorted(p[2] for p in pixels)
