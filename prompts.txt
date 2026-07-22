@@ -1,84 +1,58 @@
 ================================================================================
-          AI PROMPTS FOR GENERATING EASY-TO-SLICE SPRITE SHEETS & GRIDS
+          AI PROMPTS FOR GENERATING EASY-TO-SLICE SPRITE SHEETS (SINGLE-IMAGE)
 ================================================================================
 
-This file contains copy-pasteable prompt templates and guidelines to use with 
-ChatGPT (DALL-E), Midjourney, or other AI image generators. They are optimized 
-to produce sprite sheets that can be sliced cleanly by the Image Grid Slicer.
-
-Choose the style that matches your needs:
+This file contains copy-pasteable prompt templates for ChatGPT (DALL-E) or other 
+AI image generators. These are optimized so the "Auto-Detect Grid & Borders" 
+feature in Image Grid Slicer can parse the sheet easily.
 
 --------------------------------------------------------------------------------
-STYLE 1: GRID WITH CROSSHAIR MARKERS (Best for Crosshair Grid Detection)
+PROMPT 1: STANDARD SPRITE SHEET (Transparent or Solid Background)
 --------------------------------------------------------------------------------
-This style requests the AI to draw black '+' crosshair symbols between the grid
-cells (just like in unnamed.png). Our crosshair auto-detection pass will align
-the grid lines perfectly using these markers.
+Use this prompt when you want a standard sprite sheet without complex backgrounds:
 
-PROMPT TEMPLATE:
-"Generate a 2D game sprite sheet of [DESCRIBE YOUR CHARACTER/ITEM HERE, e.g., a 
-fantasy knight performing a sword swing animation]. 
+"Generate a 2D game sprite sheet of [DESCRIBE CHARACTER/ITEM, e.g., a pixel art 
+wizard walking]. 
 Format the image as a uniform grid of 3 rows and 4 columns (12 frames total).
-CRITICAL GRID INSTRUCTIONS:
-1. The background of the entire image must be pure solid white.
-2. Every individual cell in the grid must be separated by small, thin, black '+' 
-   crosshair alignment marks drawn precisely at the intersections of the grid 
-   boundaries (including the outer boundary edges).
-3. The sprites in each frame must be identical in size, perfectly centered 
-   within their respective grid cells, and must not touch the crosshair marks or 
-   the boundaries.
-4. Keep the visual style clean, flat, and consistent across all frames."
+INSTRUCTIONS FOR AUTO-DETECTION:
+1. The background of the entire image must be a single, solid flat color (such 
+   as pure white or pure black) with no gradients, lighting, or shadows.
+2. Leave a clear, uniform spacing gap (gutter/margin) of about 15-20 pixels 
+   between all rows and columns.
+3. Every sprite must be identical in size, perfectly centered in its grid cell, 
+   and must not touch the borders or other sprites."
 
 --------------------------------------------------------------------------------
-STYLE 2: SOLID GAP SPACING (Best for Standard Border Auto-Detection)
+PROMPT 2: SPRITE SHEET WITH COMPOSITED BACKGROUND (Single Image Output)
 --------------------------------------------------------------------------------
-This style requests a solid, uniform background color with equal spacing gaps 
-between the rows and columns. Our standard auto-detect border logic works by 
-finding these solid gaps.
+Use this prompt when you want your animation frames to overlay on a background. 
+Instead of generating the background separately, this prompt tells ChatGPT to 
+output the background as the first frame (Frame 1) of the grid, followed by the 
+sprites drawn on top of it.
 
-PROMPT TEMPLATE:
-"Create a 2D character sprite sheet for [DESCRIBE CHARACTER/ITEM, e.g., a pixel 
-art wizard walking].
-Format the image into a perfectly aligned grid of 3 rows and 4 columns.
-CRITICAL LAYOUT INSTRUCTIONS:
-1. The background must be a single, solid, uniform flat color (use either pure 
-   white #FFFFFF, pure black #000000, or a solid neon chroma-key green). There 
-   must be absolutely no gradients, shadows, textures, or noise in the background.
-2. Leave a clear, uniform spacing gap (gutter/margin) of approximately 20 pixels 
-   between each row and column.
-3. Every sprite must be completely self-contained and perfectly centered in the 
-   middle of its cell, leaving ample empty background padding around it.
-4. No part of the sprites should overlap or spill into the spacing gaps."
-
---------------------------------------------------------------------------------
-STYLE 3: SPRITES WITH A COMPOSITED BACKGROUND (Animation Layering)
---------------------------------------------------------------------------------
-If you want to use the "Animate" tab's background composition feature (where 
-you composite sprites over a static background image), use this multi-step 
-prompt sequence.
-
-STEP 1: Generate the Background Image
-"Generate a high-detail, static background scene for a 2D side-scrolling game. 
-The scene should be [DESCRIBE SCENE, e.g., a spooky dark forest or a sci-fi 
-corridor]. It should be flat, without any characters, items, or foreground 
-elements. Use a 16:9 aspect ratio."
-
-STEP 2: Generate the Sprites (Matching the Art Style)
-"Generate a 2D game sprite sheet of [DESCRIBE CHARACTER] that matches the art 
-style of [DESCRIBE STEP 1 SCENE]. 
-Format the image as a 3x4 grid of 12 frames. 
-Every sprite frame must be centered on a pure, solid flat black background. 
-Each sprite should be isolated, centered, and have empty space around it so 
-the background can be keyed out/made transparent."
+"Generate a single 2D game sprite sheet formatted as a uniform grid of 3 rows and 
+4 columns (12 frames total). 
+The theme/scene is: [DESCRIBE THE SCENE/CHARACTER, e.g., a futuristic robot 
+running inside a spaceship corridor].
+INSTRUCTIONS FOR THE CELL GRID:
+- Cell 1 (Row 1, Column 1) must be the background scene ONLY (empty spaceship 
+  corridor, no character, no sprite).
+- Cells 2 through 12 (the remaining 11 frames) must contain the character/sprite 
+  performing its animation sequence, layered directly on top of the exact same 
+  background corridor.
+- Each cell must have identical dimensions and the background must align 
+  perfectly across all cells.
+- Leave a clear, uniform solid-color spacing gap of about 15-20 pixels between 
+  all cells so the auto-slicer can detect the grid layout."
 
 --------------------------------------------------------------------------------
-💡 PRO-TIPS FOR BEST RESULTS:
+💡 HOW TO ANIMATE USING THE COMPOSITED BACKGROUND FRAME:
 --------------------------------------------------------------------------------
-1. Avoid Gradients in the Background: DALL-E loves to add subtle lighting gradients 
-   (vignettes) to the edges. Always specify "flat color background" or "solid 
-   pure white" to ensure the gaps remain mathematically uniform.
-2. Centering: Asking for "perfectly centered within its respective grid cell" 
-   is key to preventing cropped or off-center animations when you loop the frames.
-3. Color Contrasting: Choose a background color that is not present in the sprite 
-   itself (e.g., use a white background for dark sprites, and a black background 
-   for bright/neon sprites). This makes transparency keying much cleaner.
+1. Load the generated grid image into Image Grid Slicer.
+2. Click "Auto-Detect Grid & Borders" and click "Slice Image".
+3. Go to the "Animate" tab and click "Load Frames from Slice".
+4. Check the box "Use background image".
+5. Set "Background Frame Index" to 1 (this corresponds to Cell 1, which contains 
+   only the background scene).
+6. The preview will automatically composite the sprites from the other frames 
+   centered over the background frame, creating a smooth animation!

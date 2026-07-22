@@ -1445,15 +1445,18 @@ class ImageSlicerApp:
                                 "row_groups": row_groups
                             }
         except Exception:
-            pass  # Fallback to standard color gap detection if anything fails
+            pass
 
         def check_col(x):
             sample_y = [0, H // 4, H // 2, 3 * H // 4, H - 1]
             samples  = [img.getpixel((x, y)) for y in sample_y]
             ref = samples[0]
             for p in samples[1:]:
-                dist = (abs(ref[0] - p[0]) + abs(ref[1] - p[1]) +
-                        abs(ref[2] - p[2]) + abs(ref[3] - p[3]))
+                if p[3] < 10 and ref[3] < 10:
+                    dist = 0
+                else:
+                    dist = (abs(ref[0] - p[0]) + abs(ref[1] - p[1]) +
+                            abs(ref[2] - p[2]) + abs(ref[3] - p[3]))
                 if dist > color_tolerance * 1.5:
                     return False, None
             pixels = [img.getpixel((x, y)) for y in range(H)]
@@ -1465,8 +1468,11 @@ class ImageSlicerApp:
                             b_sorted[H // 2], a_sorted[H // 2])
             matches = 0
             for p in pixels:
-                dist = (abs(p[0] - median_color[0]) + abs(p[1] - median_color[1]) +
-                        abs(p[2] - median_color[2]) + abs(p[3] - median_color[3]))
+                if p[3] < 10 and median_color[3] < 10:
+                    dist = 0
+                else:
+                    dist = (abs(p[0] - median_color[0]) + abs(p[1] - median_color[1]) +
+                            abs(p[2] - median_color[2]) + abs(p[3] - median_color[3]))
                 if dist <= color_tolerance:
                     matches += 1
             ratio = matches / H
@@ -1477,11 +1483,14 @@ class ImageSlicerApp:
             samples  = [img.getpixel((x, y)) for x in sample_x]
             ref = samples[0]
             for p in samples[1:]:
-                dist = (abs(ref[0] - p[0]) + abs(ref[1] - p[1]) +
-                        abs(ref[2] - p[2]) + abs(ref[3] - p[3]))
+                if p[3] < 10 and ref[3] < 10:
+                    dist = 0
+                else:
+                    dist = (abs(ref[0] - p[0]) + abs(ref[1] - p[1]) +
+                            abs(ref[2] - p[2]) + abs(ref[3] - p[3]))
                 if dist > color_tolerance * 1.5:
                     return False, None
-            pixels = [img.getpixel((x, y)) for x in range(W)]
+            pixels = [img.getpixel((x, y)) for y in range(W)]
             r_sorted = sorted(p[0] for p in pixels)
             g_sorted = sorted(p[1] for p in pixels)
             b_sorted = sorted(p[2] for p in pixels)
@@ -1490,8 +1499,11 @@ class ImageSlicerApp:
                             b_sorted[W // 2], a_sorted[W // 2])
             matches = 0
             for p in pixels:
-                dist = (abs(p[0] - median_color[0]) + abs(p[1] - median_color[1]) +
-                        abs(p[2] - median_color[2]) + abs(p[3] - median_color[3]))
+                if p[3] < 10 and median_color[3] < 10:
+                    dist = 0
+                else:
+                    dist = (abs(p[0] - median_color[0]) + abs(p[1] - median_color[1]) +
+                            abs(p[2] - median_color[2]) + abs(p[3] - median_color[3]))
                 if dist <= color_tolerance:
                     matches += 1
             ratio = matches / W
