@@ -1,1 +1,1 @@
-git_pull.command
+commands/git_pull.command

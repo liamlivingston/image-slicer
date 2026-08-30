@@ -1,6 +1,16 @@
 #!/bin/bash
-# Move to project root directory
-cd "$(dirname "$0")/.." || exit 1
+# Resolve physical script directory (dereferencing symlinks)
+SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SOURCE" ]; do
+  DIR="$( cd -P "$( dirname "$SOURCE" )" >/dev/null 2>&1 && pwd )"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$( cd -P "$( dirname "$SOURCE" )" >/dev/null 2>&1 && pwd )"
+
+# Project root is 2 levels up from scripts/commands/
+PROJECT_ROOT="$( cd -P "$SCRIPT_DIR/../.." >/dev/null 2>&1 && pwd )"
+cd "$PROJECT_ROOT" || exit 1
 
 clear
 echo "=================================================="
@@ -36,7 +46,7 @@ env/bin/python3 -m pip install -r requirements.txt
 echo ""
 echo "=================================================="
 echo "🎉 Setup Complete! You can launch the app via:"
-echo "   scripts/run.command"
+echo "   scripts/Run App.command"
 echo "=================================================="
 echo ""
 read -p "Press [Enter] to close this window..."

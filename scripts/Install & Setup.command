@@ -1,1 +1,1 @@
-setup.command
+commands/setup.command

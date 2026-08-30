@@ -1,1 +1,1 @@
-run.command
+commands/run.command
