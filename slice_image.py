@@ -2,23 +2,93 @@
 import os
 import sys
 import math
+import subprocess
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog
 from PIL import Image, ImageTk, ImageDraw
 
 # ---------------------------------------------------------------------------
-# Color Palette
+# Light & Dark Color Palettes
 # ---------------------------------------------------------------------------
-BG        = "#1a1a2e"  # Very dark navy background
-SURFACE   = "#16213e"  # Dark blue-gray surface panel
-CARD      = "#0f3460"  # Section card containers
-ACCENT    = "#e94560"  # Vibrant red-pink for primary actions / highlights
-ACCENT2   = "#533483"  # Deep purple for secondary actions
-TEXT      = "#ffffff"  # Crisp white text
-SUBTEXT   = "#a0a0b0"  # Muted readable text
-GREEN     = "#00ff88"  # Neon green for grid lines / success
-BORDER    = "#2a2a4a"  # Crisp borders
-CANVAS_BG = "#0d1117"  # Deep dark canvas background
+LIGHT_PALETTE = {
+    "BG":        "#f2f2f7",  # macOS system grouped background
+    "SURFACE":   "#ffffff",  # Crisp pure white for cards and panels
+    "CARD":      "#ffffff",  # Card container background
+    "ACCENT":    "#007aff",  # Apple system blue
+    "ACCENT2":   "#5856d6",  # Apple indigo
+    "TEXT":      "#1c1c1e",  # Primary dark text (high contrast)
+    "SUBTEXT":   "#48484a",  # Secondary readable dark gray text
+    "GREEN":     "#28a745",  # Forest green
+    "BORDER":    "#d1d1d6",  # Clean divider border
+    "CANVAS_BG": "#e5e5ea",  # Canvas neutral gray
+}
+
+DARK_PALETTE = {
+    "BG":        "#1a1a2e",  # Very dark navy background
+    "SURFACE":   "#16213e",  # Dark blue-gray surface panel
+    "CARD":      "#0f3460",  # Section card containers
+    "ACCENT":    "#e94560",  # Vibrant red-pink for primary actions / highlights
+    "ACCENT2":   "#533483",  # Deep purple for secondary actions
+    "TEXT":      "#ffffff",  # Crisp white text
+    "SUBTEXT":   "#a0a0b0",  # Muted readable text
+    "GREEN":     "#00ff88",  # Neon green for grid lines / success
+    "BORDER":    "#2a2a4a",  # Crisp borders
+    "CANVAS_BG": "#0d1117",  # Deep dark canvas background
+}
+
+CONFIG_PATH = os.path.expanduser("~/.image_slicer_config.json")
+
+def get_system_theme():
+    try:
+        cmd = ["defaults", "read", "-g", "AppleInterfaceStyle"]
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=1)
+        if res.stdout.strip() == "Dark":
+            return "dark"
+    except Exception:
+        pass
+    return "light"
+
+def load_user_theme():
+    import json
+    if os.path.exists(CONFIG_PATH):
+        try:
+            with open(CONFIG_PATH, "r") as f:
+                cfg = json.load(f)
+                if cfg.get("theme") in ("light", "dark"):
+                    return cfg["theme"]
+        except Exception:
+            pass
+    return get_system_theme()
+
+def save_user_theme(theme_mode):
+    import json
+    try:
+        cfg = {}
+        if os.path.exists(CONFIG_PATH):
+            try:
+                with open(CONFIG_PATH, "r") as f:
+                    cfg = json.load(f)
+            except Exception:
+                cfg = {}
+        cfg["theme"] = theme_mode
+        with open(CONFIG_PATH, "w") as f:
+            json.dump(cfg, f)
+    except Exception:
+        pass
+
+DEFAULT_THEME = load_user_theme()
+_active_pal = DARK_PALETTE if DEFAULT_THEME == "dark" else LIGHT_PALETTE
+
+BG        = _active_pal["BG"]
+SURFACE   = _active_pal["SURFACE"]
+CARD      = _active_pal["CARD"]
+ACCENT    = _active_pal["ACCENT"]
+ACCENT2   = _active_pal["ACCENT2"]
+TEXT      = _active_pal["TEXT"]
+SUBTEXT   = _active_pal["SUBTEXT"]
+GREEN     = _active_pal["GREEN"]
+BORDER    = _active_pal["BORDER"]
+CANVAS_BG = _active_pal["CANVAS_BG"]
 
 
 # ---------------------------------------------------------------------------
@@ -88,8 +158,10 @@ class ImageSlicerApp:
         self.extract_color_var        = tk.StringVar(value="#ffffff")
         self.extract_tol_var          = tk.DoubleVar(value=30.0)
 
-        # Apply dark style
-        self.apply_dark_style()
+        self.current_theme            = DEFAULT_THEME
+
+        # Apply style
+        self.apply_style()
 
         # Root grid
         self.root.columnconfigure(0, weight=1)
@@ -105,6 +177,10 @@ class ImageSlicerApp:
 
         self._build_left_panel()
         self._build_right_panel()
+
+        # Configure pane weights: left fixed, right expands
+        self.paned.paneconfig(self.left_outer, minsize=350, stretch="never")
+        self.paned.paneconfig(self.right_outer, minsize=400, stretch="always")
 
         # Variable traces
         self.bind_trace(self.cols_var,        self.on_grid_dim_changed)
@@ -125,37 +201,119 @@ class ImageSlicerApp:
         self.draw_placeholder()
 
     # -----------------------------------------------------------------------
-    # DARK STYLE
+    # THEME & STYLES (Light Mode & Dark Mode)
     # -----------------------------------------------------------------------
-    def apply_dark_style(self):
+    def toggle_theme(self):
+        new_mode = "light" if self.current_theme == "dark" else "dark"
+        self.apply_theme(new_mode)
+
+    def apply_theme(self, mode):
+        global BG, SURFACE, CARD, ACCENT, ACCENT2, TEXT, SUBTEXT, GREEN, BORDER, CANVAS_BG
+        self.current_theme = mode
+        pal = DARK_PALETTE if mode == "dark" else LIGHT_PALETTE
+        BG        = pal["BG"]
+        SURFACE   = pal["SURFACE"]
+        CARD      = pal["CARD"]
+        ACCENT    = pal["ACCENT"]
+        ACCENT2   = pal["ACCENT2"]
+        TEXT      = pal["TEXT"]
+        SUBTEXT   = pal["SUBTEXT"]
+        GREEN     = pal["GREEN"]
+        BORDER    = pal["BORDER"]
+        CANVAS_BG = pal["CANVAS_BG"]
+
+        self.apply_style()
+        self.update_widget_colors()
+        if hasattr(self, "theme_btn"):
+            self.theme_btn.config(text="☀️ Light" if mode == "dark" else "🌙 Dark")
+        save_user_theme(mode)
+        self.update_preview()
+
+    def update_widget_colors(self):
+        self.root.configure(bg=BG)
+        self.paned.configure(bg=BG)
+        self.canvas.configure(bg=CANVAS_BG)
+        self.canvas_container.configure(bg=CANVAS_BG)
+
+        def _recolor(w):
+            cls = w.winfo_class()
+            try:
+                if cls == "Frame":
+                    curr = w.cget("bg")
+                    if curr in (LIGHT_PALETTE["CARD"], DARK_PALETTE["CARD"]):
+                        w.configure(bg=CARD)
+                    elif curr in (LIGHT_PALETTE["SURFACE"], DARK_PALETTE["SURFACE"]):
+                        w.configure(bg=SURFACE)
+                    else:
+                        w.configure(bg=BG)
+                elif cls == "Label":
+                    curr = w.cget("bg")
+                    curr_fg = w.cget("fg")
+                    if curr in (LIGHT_PALETTE["CARD"], DARK_PALETTE["CARD"]):
+                        w.configure(bg=CARD)
+                    elif curr in (LIGHT_PALETTE["SURFACE"], DARK_PALETTE["SURFACE"]):
+                        w.configure(bg=SURFACE)
+                    else:
+                        w.configure(bg=BG)
+                    if curr_fg in (LIGHT_PALETTE["ACCENT"], DARK_PALETTE["ACCENT"]):
+                        w.configure(fg=ACCENT)
+                    elif curr_fg in (LIGHT_PALETTE["SUBTEXT"], DARK_PALETTE["SUBTEXT"]):
+                        w.configure(fg=SUBTEXT)
+                    elif curr_fg in (LIGHT_PALETTE["GREEN"], DARK_PALETTE["GREEN"]):
+                        w.configure(fg=GREEN)
+                    else:
+                        w.configure(fg=TEXT)
+                elif cls == "Entry":
+                    w.configure(bg=CARD if self.current_theme == "dark" else SURFACE,
+                                fg=TEXT, insertbackground=TEXT,
+                                highlightbackground=BORDER, highlightcolor=ACCENT)
+                elif cls == "Listbox":
+                    w.configure(bg=SURFACE, fg=TEXT, selectbackground=ACCENT)
+                elif cls == "Radiobutton":
+                    w.configure(bg=BG if w.cget("bg") in (LIGHT_PALETTE["BG"], DARK_PALETTE["BG"]) else CARD,
+                                fg=TEXT, activebackground=BG, activeforeground=ACCENT)
+                elif cls == "Checkbutton":
+                    w.configure(bg=CARD, fg=TEXT, activebackground=CARD, activeforeground=ACCENT)
+                elif cls == "Canvas" and w != self.canvas:
+                    w.configure(bg=BG)
+            except Exception:
+                pass
+            for child in w.winfo_children():
+                _recolor(child)
+
+        _recolor(self.root)
+
+    def apply_style(self):
         self.style = ttk.Style()
         self.style.theme_use("clam")
         self.style.configure("TFrame",            background=BG)
         self.style.configure("TLabel",            background=BG, foreground=TEXT)
-        self.style.configure("TButton",           background=CARD, foreground=TEXT,
-                                                  bordercolor=BORDER, focuscolor=ACCENT, padding=6)
-        self.style.map("TButton",                 background=[("active", ACCENT2), ("pressed", ACCENT)],
-                                                  foreground=[("active", "white")])
+        self.style.configure("TButton",           background=CARD if self.current_theme == "dark" else "#ffffff",
+                                                  foreground=TEXT, bordercolor=BORDER, focuscolor=ACCENT, padding=6)
+        self.style.map("TButton",                 background=[("active", BORDER if self.current_theme == "light" else ACCENT2),
+                                                              ("pressed", CARD if self.current_theme == "light" else ACCENT)],
+                                                  foreground=[("active", TEXT if self.current_theme == "light" else "white")])
         self.style.configure("Accent.TButton",    background=ACCENT, foreground="white",
                                                   font=("Helvetica", 10, "bold"), padding=8, bordercolor=ACCENT)
-        self.style.map("Accent.TButton",          background=[("active", "#d6304d"), ("pressed", "#b8243c")],
+        self.style.map("Accent.TButton",          background=[("active", "#005ecb" if self.current_theme == "light" else "#d6304d"),
+                                                              ("pressed", "#004b9b" if self.current_theme == "light" else "#b8243c")],
                                                   foreground=[("active", "white")])
         self.style.configure("Stop.TButton",      background="#ff3b30", foreground="white",
                                                   font=("Helvetica", 9, "bold"), padding=6)
         self.style.map("Stop.TButton",            background=[("active", "#ff453a"), ("pressed", "#d6241a")])
         self.style.configure("Secondary.TButton", background=ACCENT2, foreground="white", padding=6)
-        self.style.map("Secondary.TButton",       background=[("active", "#6c45ab")])
-        self.style.configure("TEntry",            fieldbackground=CARD, foreground=TEXT,
-                                                  insertcolor=TEXT, bordercolor=BORDER)
+        self.style.map("Secondary.TButton",       background=[("active", "#4745ab" if self.current_theme == "light" else "#6c45ab")])
+        self.style.configure("TEntry",            fieldbackground=CARD if self.current_theme == "dark" else "#ffffff",
+                                                  foreground=TEXT, insertcolor=TEXT, bordercolor=BORDER)
         self.style.configure("TNotebook",         background=BG, bordercolor=BORDER)
-        self.style.configure("TNotebook.Tab",     background=CARD, foreground=SUBTEXT,
-                                                  padding=[12, 6])
-        self.style.map("TNotebook.Tab",           background=[("selected", ACCENT)],
-                                                  foreground=[("selected", "white")])
-        self.style.configure("TScrollbar",        background=CARD, troughcolor=BG,
-                                                  bordercolor=BORDER, arrowcolor=TEXT)
-        self.style.configure("TSpinbox",          fieldbackground=CARD, foreground=TEXT,
-                                                  bordercolor=BORDER, arrowcolor=TEXT)
+        self.style.configure("TNotebook.Tab",     background=CARD if self.current_theme == "dark" else "#e5e5ea",
+                                                  foreground=TEXT, padding=[12, 6])
+        self.style.map("TNotebook.Tab",           background=[("selected", SURFACE if self.current_theme == "light" else ACCENT)],
+                                                  foreground=[("selected", ACCENT if self.current_theme == "light" else "white")])
+        self.style.configure("TScrollbar",        background=CARD if self.current_theme == "dark" else "#ffffff",
+                                                  troughcolor=BG, bordercolor=BORDER, arrowcolor=TEXT)
+        self.style.configure("TSpinbox",          fieldbackground=CARD if self.current_theme == "dark" else "#ffffff",
+                                                  foreground=TEXT, bordercolor=BORDER, arrowcolor=TEXT)
         self.style.configure("TLabelframe",       background=BG, bordercolor=BORDER)
         self.style.configure("TLabelframe.Label", background=BG, foreground=ACCENT)
         self.style.configure("TRadiobutton",      background=BG, foreground=TEXT)
@@ -166,12 +324,12 @@ class ImageSlicerApp:
     # BUILD LEFT PANEL (scrollable)
     # -----------------------------------------------------------------------
     def _build_left_panel(self):
-        left_outer = tk.Frame(self.paned, bg=BG, width=375)
-        left_outer.pack_propagate(False)
-        self.paned.add(left_outer, minsize=320)
+        self.left_outer = tk.Frame(self.paned, bg=BG, width=375)
+        self.left_outer.pack_propagate(False)
+        self.paned.add(self.left_outer, minsize=350)
 
-        scroll_canvas = tk.Canvas(left_outer, bg=BG, highlightthickness=0, bd=0)
-        scrollbar = ttk.Scrollbar(left_outer, orient="vertical", command=scroll_canvas.yview)
+        scroll_canvas = tk.Canvas(self.left_outer, bg=BG, highlightthickness=0, bd=0)
+        scrollbar = ttk.Scrollbar(self.left_outer, orient="vertical", command=scroll_canvas.yview)
         scroll_canvas.configure(yscrollcommand=scrollbar.set)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         scroll_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -243,13 +401,16 @@ class ImageSlicerApp:
         tk.Frame(f, bg=BORDER, height=1).pack(
             side=tk.LEFT, fill=tk.X, expand=True, padx=(8, 0), pady=4)
 
-    def _dark_entry(self, parent, textvariable, width=12):
+    def _dark_entry(self, parent, textvariable, width=12, state="normal"):
         return tk.Entry(
             parent, textvariable=textvariable, width=width,
-            bg=CARD, fg=TEXT, insertbackground=TEXT,
-            relief="flat", font=("Helvetica", 9),
-            highlightthickness=1, highlightbackground=BORDER,
-            highlightcolor=ACCENT
+            bg=CARD if self.current_theme == "dark" else SURFACE,
+            fg=TEXT, insertbackground=TEXT,
+            relief="solid", bd=1, font=("Helvetica", 9),
+            highlightthickness=0, highlightbackground=BORDER,
+            highlightcolor=ACCENT, state=state,
+            disabledbackground=CARD if self.current_theme == "dark" else "#e5e5ea",
+            disabledforeground=SUBTEXT
         )
 
     def _dark_btn(self, parent, text, command, bg=None, fg=None,
@@ -336,13 +497,8 @@ class ImageSlicerApp:
         out_f = tk.Frame(parent, bg=BG)
         out_f.pack(fill=tk.X, **pad)
         self.output_dir_var = tk.StringVar(value="[sliced-images/ in app directory]")
-        tk.Entry(out_f, textvariable=self.output_dir_var,
-                 bg=CARD, fg=SUBTEXT, insertbackground=TEXT,
-                 relief="flat", font=("Helvetica", 9), state="disabled",
-                 highlightthickness=1, highlightbackground=BORDER,
-                 highlightcolor=ACCENT, disabledbackground=CARD,
-                 disabledforeground=SUBTEXT
-                 ).pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=4)
+        self._dark_entry(out_f, self.output_dir_var, width=26, state="disabled").pack(
+            side=tk.LEFT, fill=tk.X, expand=True, ipady=4)
         self._dark_btn(out_f, "Change…", self.browse_output_dir).pack(
             side=tk.LEFT, padx=(6, 0))
 
@@ -355,22 +511,14 @@ class ImageSlicerApp:
         tk.Label(name_card, text="Folder Name:", bg=CARD, fg=TEXT,
                  font=("Helvetica", 9)).grid(row=0, column=0, sticky=tk.W, pady=3)
         self.subfolder_var = tk.StringVar(value="{filename}_sliced")
-        tk.Entry(name_card, textvariable=self.subfolder_var,
-                 bg=SURFACE, fg=TEXT, insertbackground=TEXT,
-                 relief="flat", font=("Helvetica", 9),
-                 highlightthickness=1, highlightbackground=BORDER,
-                 highlightcolor=ACCENT
-                 ).grid(row=0, column=1, sticky="ew", padx=(8, 0), pady=3)
+        self._dark_entry(name_card, self.subfolder_var, width=20).grid(
+            row=0, column=1, sticky="ew", padx=(8, 0), pady=3)
 
         tk.Label(name_card, text="File Prefix:", bg=CARD, fg=TEXT,
                  font=("Helvetica", 9)).grid(row=1, column=0, sticky=tk.W, pady=3)
         self.prefix_var = tk.StringVar(value="{filename}_")
-        tk.Entry(name_card, textvariable=self.prefix_var,
-                 bg=SURFACE, fg=TEXT, insertbackground=TEXT,
-                 relief="flat", font=("Helvetica", 9),
-                 highlightthickness=1, highlightbackground=BORDER,
-                 highlightcolor=ACCENT
-                 ).grid(row=1, column=1, sticky="ew", padx=(8, 0), pady=3)
+        self._dark_entry(name_card, self.prefix_var, width=20).grid(
+            row=1, column=1, sticky="ew", padx=(8, 0), pady=3)
 
         tk.Label(name_card, text="Scheme:", bg=CARD, fg=TEXT,
                  font=("Helvetica", 9)).grid(row=2, column=0, sticky=tk.W, pady=3)
@@ -632,22 +780,30 @@ class ImageSlicerApp:
     # BUILD RIGHT PANEL
     # -----------------------------------------------------------------------
     def _build_right_panel(self):
-        right_outer = tk.Frame(self.paned, bg=BG)
-        self.paned.add(right_outer, minsize=400)
-        right_outer.columnconfigure(0, weight=1)
-        right_outer.rowconfigure(1, weight=1)
-        right_outer.rowconfigure(0, weight=0)
-        right_outer.rowconfigure(2, weight=0)
+        self.right_outer = tk.Frame(self.paned, bg=BG)
+        self.paned.add(self.right_outer, minsize=400)
+        self.right_outer.columnconfigure(0, weight=1)
+        self.right_outer.rowconfigure(1, weight=1)
+        self.right_outer.rowconfigure(0, weight=0)
+        self.right_outer.rowconfigure(2, weight=0)
 
         # Header strip
-        header = tk.Frame(right_outer, bg=SURFACE, height=34)
+        header = tk.Frame(self.right_outer, bg=SURFACE, height=34)
         header.grid(row=0, column=0, sticky="ew")
         tk.Label(header, text="Live Preview",
                  bg=SURFACE, fg=TEXT, font=("Helvetica", 11, "bold")
                  ).pack(side=tk.LEFT, padx=14, pady=6)
 
+        self.theme_btn = ttk.Button(
+            header,
+            text="☀️ Light" if self.current_theme == "dark" else "🌙 Dark",
+            command=self.toggle_theme,
+            width=8
+        )
+        self.theme_btn.pack(side=tk.RIGHT, padx=10, pady=4)
+
         # Canvas container
-        self.canvas_container = tk.Frame(right_outer, bg=CANVAS_BG)
+        self.canvas_container = tk.Frame(self.right_outer, bg=CANVAS_BG)
         self.canvas_container.grid(row=1, column=0, sticky="nsew")
         self.canvas_container.rowconfigure(0, weight=1)
         self.canvas_container.columnconfigure(0, weight=1)
@@ -659,7 +815,7 @@ class ImageSlicerApp:
         self.canvas_container.bind("<Configure>", self.on_canvas_resize)
 
         # Bottom bar
-        self.bottom_bar = tk.Frame(right_outer, bg=SURFACE, height=36)
+        self.bottom_bar = tk.Frame(self.right_outer, bg=SURFACE, height=36)
         self.bottom_bar.grid(row=2, column=0, sticky="ew")
         self.bottom_bar.columnconfigure(0, weight=1)
         self.hint_label = tk.Label(
@@ -675,7 +831,7 @@ class ImageSlicerApp:
                        ).grid(row=0, column=col_i, padx=(2, 4), pady=4)
 
         # Timeline bar (hidden by default)
-        self.timeline_frame = tk.Frame(right_outer, bg=SURFACE, height=36)
+        self.timeline_frame = tk.Frame(self.right_outer, bg=SURFACE, height=36)
         self.timeline_frame.columnconfigure(1, weight=1)
         
         self.play_pause_btn = ttk.Button(self.timeline_frame, text="⏸", command=self.toggle_play_pause, width=3)
@@ -751,14 +907,71 @@ class ImageSlicerApp:
     # -----------------------------------------------------------------------
     def draw_placeholder(self):
         self.canvas.delete("all")
-        self.canvas.config(scrollregion=(0, 0, 400, 400))
-        cw = max(400, self.canvas.winfo_width())
-        ch = max(400, self.canvas.winfo_height())
-        self.canvas.create_text(
-            cw // 2, ch // 2,
-            text="No Image Loaded\nClick 'Browse…' in the Slice tab to select an image.",
-            justify=tk.CENTER, fill=SUBTEXT, font=("Helvetica", 11)
+        cw = max(500, self.canvas.winfo_width())
+        ch = max(450, self.canvas.winfo_height())
+        self.canvas.config(scrollregion=(0, 0, cw, ch))
+
+        cx, cy = cw // 2, ch // 2
+        card_w, card_h = 480, 290
+        x1, y1 = cx - card_w // 2, cy - card_h // 2
+        x2, y2 = cx + card_w // 2, cy + card_h // 2
+
+        # Card shadow
+        shadow_fill = "#c7c7cc" if self.current_theme == "light" else "#0a0a14"
+        self.canvas.create_rectangle(
+            x1 + 4, y1 + 4, x2 + 4, y2 + 4,
+            fill=shadow_fill, outline=""
         )
+
+        # Main Card surface
+        self.canvas.create_rectangle(
+            x1, y1, x2, y2,
+            fill=SURFACE, outline=BORDER, width=2
+        )
+
+        # Top Accent Stripe
+        self.canvas.create_rectangle(
+            x1, y1, x2, y1 + 5,
+            fill=ACCENT, outline=""
+        )
+
+        # Title & Subtitle
+        self.canvas.create_text(
+            cx, y1 + 42,
+            text="Image Grid Slicer",
+            fill=TEXT, font=("Helvetica", 16, "bold")
+        )
+        self.canvas.create_text(
+            cx, y1 + 70,
+            text="Auto grid detection, border cropping, and GIF animation",
+            fill=SUBTEXT, font=("Helvetica", 10)
+        )
+
+        # Divider line
+        self.canvas.create_line(
+            x1 + 30, y1 + 90, x2 - 30, y1 + 90,
+            fill=BORDER, width=1
+        )
+
+        # Quick guide steps
+        guide_text = (
+            "1. Click 'Browse…' on the left (or below) to select an image\n"
+            "2. Click '⚡ Auto-Detect Grid & Borders' to scan cells\n"
+            "3. Preview & fine-tune divider lines directly on this canvas\n"
+            "4. Click '✂ Slice Image' or switch to '🎬 Animate' for GIF"
+        )
+        self.canvas.create_text(
+            x1 + 40, y1 + 150,
+            text=guide_text, anchor="w",
+            fill=TEXT, font=("Helvetica", 10), justify=tk.LEFT
+        )
+
+        # Direct Browse button right inside the canvas card
+        self.placeholder_btn = ttk.Button(
+            self.canvas, text="📂  Browse Image File…",
+            command=self.browse_file, style="Accent.TButton"
+        )
+        self.canvas.create_window(cx, y2 - 40, window=self.placeholder_btn, width=220, height=36)
 
     # -----------------------------------------------------------------------
     # ZOOM / PAN
@@ -2548,8 +2761,14 @@ class ImageSlicerApp:
     # -----------------------------------------------------------------------
     # STORYBOARD GRID METHODS
     # -----------------------------------------------------------------------
-    def on_tab_changed(self, event):
-        tab_idx = self.notebook.index(self.notebook.select())
+    def on_tab_changed(self, event=None):
+        try:
+            sel = self.notebook.select()
+            if not sel:
+                return
+            tab_idx = self.notebook.index(sel)
+        except Exception:
+            return
         if tab_idx == 0:  # Slice tab
             if self.preview_gif_job:
                 try:
