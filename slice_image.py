@@ -2587,7 +2587,50 @@ class ImageSlicerApp:
                 my, mx = np.unravel_index(np.argmax(corr), corr.shape)
                 if my > sh // 2: my -= sh
                 if mx > sw // 2: mx -= sw
-                shifts.append((int(mx), int(my)))
+                shifts.append((-int(mx), -int(my)))
+
+            # Pass 2: Consecutive motion minimization refinement
+            refined_shifts = [shifts[0]]
+            h_box, w_box = int(rh * 0.65), int(rw * 0.65)
+            for i in range(1, n):
+                prev_f = np.array(loaded_images[i - 1].convert("L"), dtype=float)
+                curr_f = np.array(loaded_images[i].convert("L"), dtype=float)
+                prev_dx, prev_dy = refined_shifts[i - 1]
+                base_dx, base_dy = shifts[i]
+
+                best_energy = 1e12
+                best_shift = (base_dx, base_dy)
+
+                cx_prev = int(prev_f.shape[1] / 2 + prev_dx)
+                cy_prev = int(prev_f.shape[0] / 2 + prev_dy)
+                box_prev = prev_f[max(0, cy_prev - h_box // 2):min(prev_f.shape[0], cy_prev + h_box // 2),
+                                  max(0, cx_prev - w_box // 2):min(prev_f.shape[1], cx_prev + w_box // 2)]
+
+                cx_ref = int(ref_arr.shape[1] / 2)
+                cy_ref = int(ref_arr.shape[0] / 2)
+                box_ref = ref_arr[max(0, cy_ref - h_box // 2):min(ref_arr.shape[0], cy_ref + h_box // 2),
+                                  max(0, cx_ref - w_box // 2):min(ref_arr.shape[1], cx_ref + w_box // 2)]
+
+                for ddx in range(-4, 5):
+                    for ddy in range(-4, 5):
+                        tdx = base_dx + ddx
+                        tdy = base_dy + ddy
+                        cx_curr = int(curr_f.shape[1] / 2 + tdx)
+                        cy_curr = int(curr_f.shape[0] / 2 + tdy)
+
+                        box_curr = curr_f[max(0, cy_curr - h_box // 2):min(curr_f.shape[0], cy_curr + h_box // 2),
+                                          max(0, cx_curr - w_box // 2):min(curr_f.shape[1], cx_curr + w_box // 2)]
+
+                        if box_curr.shape == box_prev.shape and box_curr.shape == box_ref.shape:
+                            inter_diff = np.mean(np.abs(box_curr - box_prev))
+                            anchor_diff = np.mean(np.abs(box_curr - box_ref))
+                            energy = 0.7 * inter_diff + 0.3 * anchor_diff
+                            if energy < best_energy:
+                                best_energy = energy
+                                best_shift = (tdx, tdy)
+                refined_shifts.append(best_shift)
+            shifts = refined_shifts
+
         else:
             from PIL import ImageChops, ImageStat
             ref_l = loaded_images[0].convert("L")
@@ -2613,7 +2656,7 @@ class ImageSlicerApp:
                             fine_best = diff
                             fine_dx = dx
                             fine_dy = dy
-                shifts.append((fine_dx, fine_dy))
+                shifts.append((-fine_dx, -fine_dy))
 
         aspect_ratios = [im.width / im.height for im in loaded_images]
         target_ar = sorted(aspect_ratios)[len(aspect_ratios) // 2]
@@ -2685,6 +2728,23 @@ class ImageSlicerApp:
                 y0 = int(round(cy - ch / 2.0))
                 x1 = x0 + cw
                 y1 = y0 + ch
+
+                # Clamp within frame bounds
+                if x0 < 0:
+                    x1 -= x0
+                    x0 = 0
+                if y0 < 0:
+                    y1 -= y0
+                    y0 = 0
+                if x1 > img.width:
+                    x0 -= (x1 - img.width)
+                    x1 = img.width
+                if y1 > img.height:
+                    y0 -= (y1 - img.height)
+                    y1 = img.height
+                x0 = max(0, x0)
+                y0 = max(0, y0)
+
                 img = img.crop((x0, y0, x1, y1))
 
         if self.use_bg_var.get() and len(self.animation_frames) > 0:
