@@ -652,7 +652,7 @@ class ImageSlicerApp:
         
         min_max_row = tk.Frame(stab_card, bg=CARD)
         min_max_row.pack(fill=tk.X)
-        tk.Label(min_max_row, text="Min (Aspect Match)", bg=CARD, fg=SUBTEXT, font=("Helvetica", 7)).pack(side=tk.LEFT)
+        tk.Label(min_max_row, text="Min (Keep Smaller Cells)", bg=CARD, fg=SUBTEXT, font=("Helvetica", 7)).pack(side=tk.LEFT)
         tk.Label(min_max_row, text="Tighter Crop (+50%)", bg=CARD, fg=SUBTEXT, font=("Helvetica", 7)).pack(side=tk.RIGHT)
         
         self.stab_info_label = tk.Label(
@@ -2487,7 +2487,7 @@ class ImageSlicerApp:
 
     def on_stabilize_toggled(self):
         if self.stabilize_var.get():
-            if not self.stabilize_cache.get("shifts"):
+            if not self.stabilize_cache.get("crop_centers"):
                 self.run_auto_stabilization()
             else:
                 self.update_preview()
@@ -2495,7 +2495,7 @@ class ImageSlicerApp:
             self.update_preview()
 
     def on_stabilize_slider_changed(self, val=None):
-        if not self.stabilize_cache.get("W_base"):
+        if not self.stabilize_cache.get("target_w"):
             if self.stabilize_var.get():
                 self.run_auto_stabilization()
             return
@@ -2506,17 +2506,17 @@ class ImageSlicerApp:
             self.update_preview()
 
     def update_stabilize_crop_dimensions(self):
-        if not self.stabilize_cache.get("W_base"):
+        if not self.stabilize_cache.get("target_w"):
             return
-        W_base = self.stabilize_cache["W_base"]
-        H_base = self.stabilize_cache["H_base"]
+        target_w = self.stabilize_cache["target_w"]
+        target_h = self.stabilize_cache["target_h"]
         try:
             slider_val = float(self.stabilize_crop_slider_var.get())
         except (ValueError, TypeError):
             slider_val = 0.0
         scale = max(0.1, 1.0 - (slider_val / 100.0))
-        cw = max(10, int(round(W_base * scale)))
-        ch = max(10, int(round(H_base * scale)))
+        cw = max(10, int(round(target_w * scale)))
+        ch = max(10, int(round(target_h * scale)))
         self.stabilize_cache["current_w"] = cw
         self.stabilize_cache["current_h"] = ch
 
@@ -2533,17 +2533,17 @@ class ImageSlicerApp:
             messagebox.showwarning("No Frames", "Please load animation frames first.")
             return
 
-        self.status_label.config(text="Stabilizing frames using objects… please wait…", fg=ACCENT)
+        self.status_label.config(text="Analyzing cells & trimming overhang… please wait…", fg=ACCENT)
         self.root.update_idletasks()
 
         success, info = self.calculate_stabilization()
         if success:
             self.stabilize_var.set(True)
             self.stab_info_label.config(
-                text=f"Aligned {info['count']} frames | Aspect: {info['ar']:.2f} ({info['w']}x{info['h']}) | Jitter: X ±{info['max_dx']}px, Y ±{info['max_dy']}px",
+                text=f"Matched {info['count']} frames to {info['w']}x{info['h']} (preserving smaller cells) | Trimmed overhang ({info['trim_h']}px)",
                 fg=GREEN
             )
-            self.status_label.config(text="Frames stabilized and aligned successfully.", fg=GREEN)
+            self.status_label.config(text="Stabilized and matched aspect ratio, preserving smaller cells.", fg=GREEN)
             self.update_preview()
         else:
             messagebox.showerror("Stabilization Failed", info.get("error", "Failed to compute stabilization."))
@@ -2562,148 +2562,135 @@ class ImageSlicerApp:
             except Exception as e:
                 return False, {"error": f"Failed to load frame {p}: {e}"}
 
-        shifts = [(0, 0)]
+        widths = [im.width for im in loaded_images]
+        heights = [im.height for im in loaded_images]
+
+        # Prioritize smaller cells: target dimensions match the smaller/standard cells
+        # This ensures smaller cells are NOT cropped, and extra overhang on larger cells is trimmed away!
+        target_w = min(widths)
+        target_h = min(heights)
+        target_ar = target_w / target_h
+
+        # Find a reference frame that has standard/smaller dimensions
+        ref_idx = 0
+        for idx in range(n):
+            if loaded_images[idx].width == target_w or loaded_images[idx].height == target_h:
+                ref_idx = idx
+                break
+
+        ref_gray = loaded_images[ref_idx].convert("L")
         has_np = self._has_numpy()
+        crop_centers = []
 
         if has_np:
             import numpy as np
-            from numpy.fft import fft2, ifft2
-            ref_arr = np.array(loaded_images[0].convert("L"), dtype=float)
-            rh, rw = ref_arr.shape
-            for i in range(1, n):
-                f_arr = np.array(loaded_images[i].convert("L"), dtype=float)
-                min_h = min(rh, f_arr.shape[0])
-                min_w = min(rw, f_arr.shape[1])
-                ch0, ch1 = int(min_h * 0.05), int(min_h * 0.95)
-                cw0, cw1 = int(min_w * 0.05), int(min_w * 0.95)
-                r_sub = ref_arr[ch0:ch1, cw0:cw1]
-                f_sub = f_arr[ch0:ch1, cw0:cw1]
-                win = np.hanning(ch1 - ch0)[:, None] * np.hanning(cw1 - cw0)[None, :]
-                F1 = fft2(r_sub * win)
-                F2 = fft2(f_sub * win)
-                cross = (F1 * F2.conj()) / (np.abs(F1 * F2.conj()) + 1e-10)
-                corr = np.real(ifft2(cross))
-                sh, sw = corr.shape
-                my, mx = np.unravel_index(np.argmax(corr), corr.shape)
-                if my > sh // 2: my -= sh
-                if mx > sw // 2: mx -= sw
-                shifts.append((-int(mx), -int(my)))
+            ref_arr = np.array(ref_gray, dtype=float)
+            ref_sub = ref_arr[:target_h:2, :target_w:2]
 
-            # Pass 2: Consecutive motion minimization refinement
-            refined_shifts = [shifts[0]]
-            h_box, w_box = int(rh * 0.65), int(rw * 0.65)
-            for i in range(1, n):
-                prev_f = np.array(loaded_images[i - 1].convert("L"), dtype=float)
-                curr_f = np.array(loaded_images[i].convert("L"), dtype=float)
-                prev_dx, prev_dy = refined_shifts[i - 1]
-                base_dx, base_dy = shifts[i]
+            for i in range(n):
+                cur_img = loaded_images[i]
+                cur_w, cur_h = cur_img.size
+                max_x0 = max(0, cur_w - target_w)
+                max_y0 = max(0, cur_h - target_h)
 
-                best_energy = 1e12
-                best_shift = (base_dx, base_dy)
+                if max_x0 == 0 and max_y0 == 0:
+                    crop_centers.append((cur_w / 2.0, cur_h / 2.0))
+                    continue
 
-                cx_prev = int(prev_f.shape[1] / 2 + prev_dx)
-                cy_prev = int(prev_f.shape[0] / 2 + prev_dy)
-                box_prev = prev_f[max(0, cy_prev - h_box // 2):min(prev_f.shape[0], cy_prev + h_box // 2),
-                                  max(0, cx_prev - w_box // 2):min(prev_f.shape[1], cx_prev + w_box // 2)]
+                f_arr = np.array(cur_img.convert("L"), dtype=float)
+                best_diff = 1e12
+                best_x0, best_y0 = 0, 0
 
-                cx_ref = int(ref_arr.shape[1] / 2)
-                cy_ref = int(ref_arr.shape[0] / 2)
-                box_ref = ref_arr[max(0, cy_ref - h_box // 2):min(ref_arr.shape[0], cy_ref + h_box // 2),
-                                  max(0, cx_ref - w_box // 2):min(ref_arr.shape[1], cx_ref + w_box // 2)]
+                step_y = max(1, max_y0 // 16) if max_y0 > 16 else 1
+                step_x = max(1, max_x0 // 16) if max_x0 > 16 else 1
 
-                for ddx in range(-4, 5):
-                    for ddy in range(-4, 5):
-                        tdx = base_dx + ddx
-                        tdy = base_dy + ddy
-                        cx_curr = int(curr_f.shape[1] / 2 + tdx)
-                        cy_curr = int(curr_f.shape[0] / 2 + tdy)
+                for y0 in range(0, max_y0 + 1, step_y):
+                    for x0 in range(0, max_x0 + 1, step_x):
+                        sub = f_arr[y0:y0+target_h:2, x0:x0+target_w:2]
+                        if sub.shape == ref_sub.shape:
+                            diff = np.mean(np.abs(sub - ref_sub))
+                            if diff < best_diff:
+                                best_diff = diff
+                                best_x0 = x0
+                                best_y0 = y0
 
-                        box_curr = curr_f[max(0, cy_curr - h_box // 2):min(curr_f.shape[0], cy_curr + h_box // 2),
-                                          max(0, cx_curr - w_box // 2):min(curr_f.shape[1], cx_curr + w_box // 2)]
+                fine_x0, fine_y0 = best_x0, best_y0
+                ref_full = ref_arr[:target_h, :target_w]
+                for dy in range(-4, 5):
+                    for dx in range(-4, 5):
+                        tx = max(0, min(max_x0, best_x0 + dx))
+                        ty = max(0, min(max_y0, best_y0 + dy))
+                        sub = f_arr[ty:ty+target_h, tx:tx+target_w]
+                        if sub.shape == ref_full.shape:
+                            diff = np.mean(np.abs(sub - ref_full))
+                            if diff < best_diff:
+                                best_diff = diff
+                                fine_x0 = tx
+                                fine_y0 = ty
 
-                        if box_curr.shape == box_prev.shape and box_curr.shape == box_ref.shape:
-                            inter_diff = np.mean(np.abs(box_curr - box_prev))
-                            anchor_diff = np.mean(np.abs(box_curr - box_ref))
-                            energy = 0.7 * inter_diff + 0.3 * anchor_diff
-                            if energy < best_energy:
-                                best_energy = energy
-                                best_shift = (tdx, tdy)
-                refined_shifts.append(best_shift)
-            shifts = refined_shifts
+                crop_centers.append((fine_x0 + target_w / 2.0, fine_y0 + target_h / 2.0))
 
         else:
             from PIL import ImageChops, ImageStat
-            ref_l = loaded_images[0].convert("L")
-            for i in range(1, n):
-                cur_l = loaded_images[i].convert("L")
-                s_ref = ref_l.resize((max(1, ref_l.width // 4), max(1, ref_l.height // 4)), Image.Resampling.BILINEAR)
-                s_cur = cur_l.resize((max(1, cur_l.width // 4), max(1, cur_l.height // 4)), Image.Resampling.BILINEAR)
+            ref_sub = ref_gray.crop((0, 0, target_w, target_h))
+            for i in range(n):
+                cur_img = loaded_images[i]
+                cur_w, cur_h = cur_img.size
+                max_x0 = max(0, cur_w - target_w)
+                max_y0 = max(0, cur_h - target_h)
+
+                if max_x0 == 0 and max_y0 == 0:
+                    crop_centers.append((cur_w / 2.0, cur_h / 2.0))
+                    continue
+
                 best_diff = 1e12
-                best_dx, best_dy = 0, 0
-                for dx in range(-8, 9):
-                    for dy in range(-8, 9):
-                        diff = ImageStat.Stat(ImageChops.difference(s_ref, ImageChops.offset(s_cur, dx, dy))).sum[0]
+                best_x0, best_y0 = 0, 0
+                step_y = max(1, max_y0 // 10) if max_y0 > 10 else 1
+                step_x = max(1, max_x0 // 10) if max_x0 > 10 else 1
+
+                for y0 in range(0, max_y0 + 1, step_y):
+                    for x0 in range(0, max_x0 + 1, step_x):
+                        sub = cur_img.convert("L").crop((x0, y0, x0 + target_w, y0 + target_h))
+                        diff = ImageStat.Stat(ImageChops.difference(sub, ref_sub)).sum[0]
                         if diff < best_diff:
                             best_diff = diff
-                            best_dx = dx * 4
-                            best_dy = dy * 4
-                fine_best = best_diff
-                fine_dx, fine_dy = best_dx, best_dy
-                for dx in range(best_dx - 3, best_dx + 4):
-                    for dy in range(best_dy - 3, best_dy + 4):
-                        diff = ImageStat.Stat(ImageChops.difference(ref_l, ImageChops.offset(cur_l, dx, dy))).sum[0]
-                        if diff < fine_best:
-                            fine_best = diff
-                            fine_dx = dx
-                            fine_dy = dy
-                shifts.append((-fine_dx, -fine_dy))
+                            best_x0 = x0
+                            best_y0 = y0
 
-        aspect_ratios = [im.width / im.height for im in loaded_images]
-        target_ar = sorted(aspect_ratios)[len(aspect_ratios) // 2]
+                fine_x0, fine_y0 = best_x0, best_y0
+                for dy in range(-3, 4):
+                    for dx in range(-3, 4):
+                        tx = max(0, min(max_x0, best_x0 + dx))
+                        ty = max(0, min(max_y0, best_y0 + dy))
+                        sub = cur_img.convert("L").crop((tx, ty, tx + target_w, ty + target_h))
+                        diff = ImageStat.Stat(ImageChops.difference(sub, ref_sub)).sum[0]
+                        if diff < best_diff:
+                            best_diff = diff
+                            fine_x0 = tx
+                            fine_y0 = ty
 
-        cx0 = loaded_images[0].width / 2.0
-        cy0 = loaded_images[0].height / 2.0
-
-        max_left_margins = [cx0 + shifts[i][0] for i in range(n)]
-        max_right_margins = [loaded_images[i].width - (cx0 + shifts[i][0]) for i in range(n)]
-        max_top_margins = [cy0 + shifts[i][1] for i in range(n)]
-        max_bottom_margins = [loaded_images[i].height - (cy0 + shifts[i][1]) for i in range(n)]
-
-        hw_max = max(10, min(min(max_left_margins), min(max_right_margins)))
-        hh_max = max(10, min(min(max_top_margins), min(max_bottom_margins)))
-
-        W_avail = int(2 * hw_max)
-        H_avail = int(2 * hh_max)
-
-        if W_avail / H_avail > target_ar:
-            H_base = H_avail
-            W_base = int(round(H_base * target_ar))
-        else:
-            W_base = W_avail
-            H_base = int(round(W_base / target_ar))
+                crop_centers.append((fine_x0 + target_w / 2.0, fine_y0 + target_h / 2.0))
 
         self.stabilize_cache = {
-            "shifts": shifts,
+            "target_w": target_w,
+            "target_h": target_h,
             "target_ar": target_ar,
-            "W_base": W_base,
-            "H_base": H_base,
-            "cx0": cx0,
-            "cy0": cy0,
+            "crop_centers": crop_centers,
             "image_sizes": [(im.width, im.height) for im in loaded_images]
         }
 
-        max_dx = max(abs(s[0]) for s in shifts)
-        max_dy = max(abs(s[1]) for s in shifts)
-
         self.update_stabilize_crop_dimensions()
+
+        max_trim_w = max(im.width - target_w for im in loaded_images)
+        max_trim_h = max(im.height - target_h for im in loaded_images)
 
         return True, {
             "count": n,
             "ar": target_ar,
             "w": self.stabilize_cache["current_w"],
             "h": self.stabilize_cache["current_h"],
-            "max_dx": max_dx,
-            "max_dy": max_dy
+            "trim_w": max_trim_w,
+            "trim_h": max_trim_h
         }
 
     def get_processed_frame(self, frame_idx):
@@ -2713,14 +2700,10 @@ class ImageSlicerApp:
         frame_path = self.animation_frames[ordered_idx]
         img = Image.open(frame_path).convert("RGBA")
 
-        if self.stabilize_var.get() and self.stabilize_cache.get("shifts"):
-            shifts = self.stabilize_cache["shifts"]
-            if frame_idx < len(shifts):
-                dx, dy = shifts[frame_idx]
-                cx0 = self.stabilize_cache["cx0"]
-                cy0 = self.stabilize_cache["cy0"]
-                cx = cx0 + dx
-                cy = cy0 + dy
+        if self.stabilize_var.get() and self.stabilize_cache.get("crop_centers"):
+            crop_centers = self.stabilize_cache["crop_centers"]
+            if frame_idx < len(crop_centers):
+                cx, cy = crop_centers[frame_idx]
                 cw = self.stabilize_cache.get("current_w", img.width)
                 ch = self.stabilize_cache.get("current_h", img.height)
 
@@ -2757,15 +2740,13 @@ class ImageSlicerApp:
             bg_path = self.animation_frames[self.animation_frame_order[bg_idx - 1]]
             try:
                 background = Image.open(bg_path).convert("RGBA")
-                if self.stabilize_var.get() and self.stabilize_cache.get("shifts") and (bg_idx - 1) < len(self.stabilize_cache["shifts"]):
-                    bg_dx, bg_dy = self.stabilize_cache["shifts"][bg_idx - 1]
-                    bg_cx = self.stabilize_cache["cx0"] + bg_dx
-                    bg_cy = self.stabilize_cache["cy0"] + bg_dy
+                if self.stabilize_var.get() and self.stabilize_cache.get("crop_centers") and (bg_idx - 1) < len(self.stabilize_cache["crop_centers"]):
+                    bg_cx, bg_cy = self.stabilize_cache["crop_centers"][bg_idx - 1]
                     bg_cw = self.stabilize_cache.get("current_w", background.width)
                     bg_ch = self.stabilize_cache.get("current_h", background.height)
                     bg_x0 = int(round(bg_cx - bg_cw / 2.0))
                     bg_y0 = int(round(bg_cy - bg_ch / 2.0))
-                    background = background.crop((bg_x0, bg_y0, bg_x0 + bg_cw, bg_y0 + bg_ch))
+                    background = background.crop((max(0, bg_x0), max(0, bg_y0), min(background.width, bg_x0 + bg_cw), min(background.height, bg_y0 + bg_ch)))
                 bg_w, bg_h = background.size
                 composite = background.copy()
                 bx = (bg_w - img.width) // 2
@@ -2781,9 +2762,9 @@ class ImageSlicerApp:
         if not self.animation_frames:
             messagebox.showwarning("No Frames", "No frames loaded to stabilize.")
             return
-        if not self.stabilize_cache.get("shifts"):
+        if not self.stabilize_cache.get("crop_centers"):
             self.run_auto_stabilization()
-            if not self.stabilize_cache.get("shifts"):
+            if not self.stabilize_cache.get("crop_centers"):
                 return
         out_dir = filedialog.askdirectory(title="Select Folder to Save Stabilized Frames")
         if not out_dir:
