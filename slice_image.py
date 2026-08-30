@@ -150,6 +150,11 @@ class ImageSlicerApp:
         self.storyboard_photos        = []
         self.dragged_cell_idx         = -1
 
+        # Animation Stabilization variables
+        self.stabilize_var             = tk.BooleanVar(value=False)
+        self.stabilize_crop_slider_var = tk.DoubleVar(value=0.0)
+        self.stabilize_cache           = {}
+
         # Sprite Extractor variables
         self.extracted_sprite_img     = None
         self.extract_source_var       = tk.StringVar()
@@ -274,6 +279,8 @@ class ImageSlicerApp:
                                 fg=TEXT, activebackground=BG, activeforeground=ACCENT)
                 elif cls == "Checkbutton":
                     w.configure(bg=CARD, fg=TEXT, activebackground=CARD, activeforeground=ACCENT)
+                elif cls == "Scale":
+                    w.configure(bg=CARD, fg=TEXT, troughcolor=SURFACE, activebackground=ACCENT)
                 elif cls == "Canvas" and w != self.canvas:
                     w.configure(bg=BG)
             except Exception:
@@ -594,6 +601,71 @@ class ImageSlicerApp:
             ttk.Button(order_grid, text=lbl, command=cmd).grid(
                 row=r, column=c, padx=2, pady=2, sticky="ew"
             )
+
+        # Stabilization & Framing
+        self._section_label(parent, "Stabilization & Framing")
+        stab_card = tk.Frame(parent, bg=CARD, padx=10, pady=8)
+        stab_card.pack(fill=tk.X, **pad)
+        
+        top_row = tk.Frame(stab_card, bg=CARD)
+        top_row.pack(fill=tk.X, pady=(0, 4))
+        
+        self.stab_cb = tk.Checkbutton(
+            top_row, text="Stabilize & Match Aspect",
+            variable=self.stabilize_var,
+            bg=CARD, fg=TEXT, selectcolor=SURFACE,
+            activebackground=CARD, activeforeground=ACCENT,
+            font=("Helvetica", 9, "bold"),
+            command=self.on_stabilize_toggled
+        )
+        self.stab_cb.pack(side=tk.LEFT)
+        
+        self.auto_stab_btn = ttk.Button(
+            top_row, text="⚡ Auto-Align",
+            command=self.run_auto_stabilization,
+            style="Accent.TButton"
+        )
+        self.auto_stab_btn.pack(side=tk.RIGHT)
+        
+        slider_label_row = tk.Frame(stab_card, bg=CARD)
+        slider_label_row.pack(fill=tk.X, pady=(4, 2))
+        tk.Label(
+            slider_label_row, text="Crop Level:",
+            bg=CARD, fg=TEXT, font=("Helvetica", 9)
+        ).pack(side=tk.LEFT)
+        
+        self.crop_level_label = tk.Label(
+            slider_label_row, text="Min Crop (0% extra)",
+            bg=CARD, fg=SUBTEXT, font=("Helvetica", 8, "bold")
+        )
+        self.crop_level_label.pack(side=tk.RIGHT)
+        
+        self.stab_scale = tk.Scale(
+            stab_card, from_=0.0, to=50.0, resolution=1.0,
+            orient=tk.HORIZONTAL, showvalue=0,
+            variable=self.stabilize_crop_slider_var,
+            bg=CARD, fg=TEXT, troughcolor=SURFACE,
+            highlightthickness=0, bd=0, activebackground=ACCENT,
+            command=self.on_stabilize_slider_changed
+        )
+        self.stab_scale.pack(fill=tk.X, pady=(0, 2))
+        
+        min_max_row = tk.Frame(stab_card, bg=CARD)
+        min_max_row.pack(fill=tk.X)
+        tk.Label(min_max_row, text="Min (Aspect Match)", bg=CARD, fg=SUBTEXT, font=("Helvetica", 7)).pack(side=tk.LEFT)
+        tk.Label(min_max_row, text="Tighter Crop (+50%)", bg=CARD, fg=SUBTEXT, font=("Helvetica", 7)).pack(side=tk.RIGHT)
+        
+        self.stab_info_label = tk.Label(
+            stab_card, text="Loads frames to detect and align object motion.",
+            bg=CARD, fg=SUBTEXT, font=("Helvetica", 8),
+            wraplength=290, justify=tk.LEFT
+        )
+        self.stab_info_label.pack(fill=tk.X, pady=(4, 4))
+        
+        self._dark_btn(
+            stab_card, "💾 Save Stabilized Frames…",
+            self.save_stabilized_frames_dialog
+        ).pack(fill=tk.X, pady=(2, 0))
 
         # Timing
         self._section_label(parent, "Timing")
@@ -1476,6 +1548,7 @@ class ImageSlicerApp:
                 count += 1
 
         self.last_output_dir = output_dir
+        self.load_frames_from_directory(output_dir)
         self.status_label.config(
             text=f"Sliced {count} images saved to: {os.path.basename(output_dir)}", fg=GREEN
         )
@@ -2341,10 +2414,48 @@ class ImageSlicerApp:
             self.frame_listbox.insert(
                 tk.END, os.path.basename(self.animation_frames[idx]))
 
+    def load_frames_from_directory(self, folder):
+        if not folder or not os.path.exists(folder):
+            return False
+        exts = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
+        found = []
+        try:
+            for fname in os.listdir(folder):
+                if os.path.splitext(fname)[1].lower() in exts:
+                    found.append(os.path.join(folder, fname))
+        except OSError:
+            return False
+        found.sort()
+        if not found:
+            return False
+        self.animation_frames = found
+        self.animation_frame_order = list(range(len(found)))
+        self.stabilize_cache = {}
+        self.refresh_frame_listbox()
+
+        n = len(found)
+        self.range_start_spin.config(from_=1, to=n)
+        self.range_end_spin.config(from_=1, to=n)
+        self.range_start_var.set("1")
+        self.range_end_var.set(str(n))
+        self.timeline_slider.config(from_=1.0, to=float(n))
+        self.timeline_slider_var.set(1.0)
+        self.current_anim_frame_idx = 1
+
+        if self.stabilize_var.get():
+            self.run_auto_stabilization()
+        else:
+            self.status_label.config(
+                text=f"Loaded {n} animation frame{'s' if n != 1 else ''} from folder.",
+                fg=GREEN
+            )
+            self.update_preview()
+        return True
+
     def load_frames_for_animation(self):
         initial = os.getcwd()
         default_parent = os.path.join(get_app_run_dir(), "sliced-images")
-        if self.last_output_dir:
+        if self.last_output_dir and os.path.exists(self.last_output_dir):
             initial = os.path.dirname(self.last_output_dir)
         elif os.path.exists(default_parent):
             initial = default_parent
@@ -2355,42 +2466,279 @@ class ImageSlicerApp:
             if os.path.exists(in_img):
                 initial = os.path.dirname(in_img)
 
-        folder  = filedialog.askdirectory(
+        folder = filedialog.askdirectory(
             title="Select Folder Containing Frames", initialdir=initial)
         if not folder:
             return
-        exts  = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
-        found = []
-        try:
-            for fname in os.listdir(folder):
-                if os.path.splitext(fname)[1].lower() in exts:
-                    found.append(os.path.join(folder, fname))
-        except OSError as e:
-            messagebox.showerror("Error", f"Could not read folder:\n{e}")
-            return
-        found.sort()
-        if not found:
+        if not self.load_frames_from_directory(folder):
             messagebox.showinfo("No Frames",
                 "No image files found in the selected folder.")
+
+    # -----------------------------------------------------------------------
+    # STABILIZATION & CROPPING METHODS
+    # -----------------------------------------------------------------------
+    def _has_numpy(self):
+        try:
+            import numpy as np
+            from numpy.fft import fft2, ifft2
+            return True
+        except ImportError:
+            return False
+
+    def on_stabilize_toggled(self):
+        if self.stabilize_var.get():
+            if not self.stabilize_cache.get("shifts"):
+                self.run_auto_stabilization()
+            else:
+                self.update_preview()
+        else:
+            self.update_preview()
+
+    def on_stabilize_slider_changed(self, val=None):
+        if not self.stabilize_cache.get("W_base"):
+            if self.stabilize_var.get():
+                self.run_auto_stabilization()
             return
-        self.animation_frames      = found
-        self.animation_frame_order = list(range(len(found)))
-        self.refresh_frame_listbox()
-        
-        n = len(found)
-        self.range_start_spin.config(from_=1, to=n)
-        self.range_end_spin.config(from_=1, to=n)
-        self.range_start_var.set("1")
-        self.range_end_var.set(str(n))
-        self.timeline_slider.config(from_=1.0, to=float(n))
-        self.timeline_slider_var.set(1.0)
-        self.current_anim_frame_idx = 1
-        
-        self.status_label.config(
-            text=f"Loaded {n} animation frame{'s' if n != 1 else ''} from folder.",
-            fg=GREEN
-        )
-        self.update_preview()
+        self.update_stabilize_crop_dimensions()
+        if self.preview_mode == "gif":
+            self.draw_gif_frame()
+        else:
+            self.update_preview()
+
+    def update_stabilize_crop_dimensions(self):
+        if not self.stabilize_cache.get("W_base"):
+            return
+        W_base = self.stabilize_cache["W_base"]
+        H_base = self.stabilize_cache["H_base"]
+        try:
+            slider_val = float(self.stabilize_crop_slider_var.get())
+        except (ValueError, TypeError):
+            slider_val = 0.0
+        scale = max(0.1, 1.0 - (slider_val / 100.0))
+        cw = max(10, int(round(W_base * scale)))
+        ch = max(10, int(round(H_base * scale)))
+        self.stabilize_cache["current_w"] = cw
+        self.stabilize_cache["current_h"] = ch
+
+        if slider_val <= 0.5:
+            self.crop_level_label.config(text=f"Min Crop ({cw}x{ch})")
+        else:
+            self.crop_level_label.config(text=f"+{int(slider_val)}% ({cw}x{ch})")
+
+    def run_auto_stabilization(self):
+        if not self.animation_frames:
+            if self.last_output_dir and os.path.exists(self.last_output_dir):
+                self.load_frames_from_directory(self.last_output_dir)
+        if not self.animation_frames:
+            messagebox.showwarning("No Frames", "Please load animation frames first.")
+            return
+
+        self.status_label.config(text="Stabilizing frames using objects… please wait…", fg=ACCENT)
+        self.root.update_idletasks()
+
+        success, info = self.calculate_stabilization()
+        if success:
+            self.stabilize_var.set(True)
+            self.stab_info_label.config(
+                text=f"Aligned {info['count']} frames | Aspect: {info['ar']:.2f} ({info['w']}x{info['h']}) | Jitter: X ±{info['max_dx']}px, Y ±{info['max_dy']}px",
+                fg=GREEN
+            )
+            self.status_label.config(text="Frames stabilized and aligned successfully.", fg=GREEN)
+            self.update_preview()
+        else:
+            messagebox.showerror("Stabilization Failed", info.get("error", "Failed to compute stabilization."))
+
+    def calculate_stabilization(self):
+        n = len(self.animation_frames)
+        if n == 0:
+            return False, {"error": "No frames loaded"}
+
+        ordered_paths = [self.animation_frames[i] for i in self.animation_frame_order]
+
+        loaded_images = []
+        for p in ordered_paths:
+            try:
+                loaded_images.append(Image.open(p).convert("RGBA"))
+            except Exception as e:
+                return False, {"error": f"Failed to load frame {p}: {e}"}
+
+        shifts = [(0, 0)]
+        has_np = self._has_numpy()
+
+        if has_np:
+            import numpy as np
+            from numpy.fft import fft2, ifft2
+            ref_arr = np.array(loaded_images[0].convert("L"), dtype=float)
+            rh, rw = ref_arr.shape
+            for i in range(1, n):
+                f_arr = np.array(loaded_images[i].convert("L"), dtype=float)
+                min_h = min(rh, f_arr.shape[0])
+                min_w = min(rw, f_arr.shape[1])
+                ch0, ch1 = int(min_h * 0.05), int(min_h * 0.95)
+                cw0, cw1 = int(min_w * 0.05), int(min_w * 0.95)
+                r_sub = ref_arr[ch0:ch1, cw0:cw1]
+                f_sub = f_arr[ch0:ch1, cw0:cw1]
+                win = np.hanning(ch1 - ch0)[:, None] * np.hanning(cw1 - cw0)[None, :]
+                F1 = fft2(r_sub * win)
+                F2 = fft2(f_sub * win)
+                cross = (F1 * F2.conj()) / (np.abs(F1 * F2.conj()) + 1e-10)
+                corr = np.real(ifft2(cross))
+                sh, sw = corr.shape
+                my, mx = np.unravel_index(np.argmax(corr), corr.shape)
+                if my > sh // 2: my -= sh
+                if mx > sw // 2: mx -= sw
+                shifts.append((int(mx), int(my)))
+        else:
+            from PIL import ImageChops, ImageStat
+            ref_l = loaded_images[0].convert("L")
+            for i in range(1, n):
+                cur_l = loaded_images[i].convert("L")
+                s_ref = ref_l.resize((max(1, ref_l.width // 4), max(1, ref_l.height // 4)), Image.Resampling.BILINEAR)
+                s_cur = cur_l.resize((max(1, cur_l.width // 4), max(1, cur_l.height // 4)), Image.Resampling.BILINEAR)
+                best_diff = 1e12
+                best_dx, best_dy = 0, 0
+                for dx in range(-8, 9):
+                    for dy in range(-8, 9):
+                        diff = ImageStat.Stat(ImageChops.difference(s_ref, ImageChops.offset(s_cur, dx, dy))).sum[0]
+                        if diff < best_diff:
+                            best_diff = diff
+                            best_dx = dx * 4
+                            best_dy = dy * 4
+                fine_best = best_diff
+                fine_dx, fine_dy = best_dx, best_dy
+                for dx in range(best_dx - 3, best_dx + 4):
+                    for dy in range(best_dy - 3, best_dy + 4):
+                        diff = ImageStat.Stat(ImageChops.difference(ref_l, ImageChops.offset(cur_l, dx, dy))).sum[0]
+                        if diff < fine_best:
+                            fine_best = diff
+                            fine_dx = dx
+                            fine_dy = dy
+                shifts.append((fine_dx, fine_dy))
+
+        aspect_ratios = [im.width / im.height for im in loaded_images]
+        target_ar = sorted(aspect_ratios)[len(aspect_ratios) // 2]
+
+        cx0 = loaded_images[0].width / 2.0
+        cy0 = loaded_images[0].height / 2.0
+
+        max_left_margins = [cx0 + shifts[i][0] for i in range(n)]
+        max_right_margins = [loaded_images[i].width - (cx0 + shifts[i][0]) for i in range(n)]
+        max_top_margins = [cy0 + shifts[i][1] for i in range(n)]
+        max_bottom_margins = [loaded_images[i].height - (cy0 + shifts[i][1]) for i in range(n)]
+
+        hw_max = max(10, min(min(max_left_margins), min(max_right_margins)))
+        hh_max = max(10, min(min(max_top_margins), min(max_bottom_margins)))
+
+        W_avail = int(2 * hw_max)
+        H_avail = int(2 * hh_max)
+
+        if W_avail / H_avail > target_ar:
+            H_base = H_avail
+            W_base = int(round(H_base * target_ar))
+        else:
+            W_base = W_avail
+            H_base = int(round(W_base / target_ar))
+
+        self.stabilize_cache = {
+            "shifts": shifts,
+            "target_ar": target_ar,
+            "W_base": W_base,
+            "H_base": H_base,
+            "cx0": cx0,
+            "cy0": cy0,
+            "image_sizes": [(im.width, im.height) for im in loaded_images]
+        }
+
+        max_dx = max(abs(s[0]) for s in shifts)
+        max_dy = max(abs(s[1]) for s in shifts)
+
+        self.update_stabilize_crop_dimensions()
+
+        return True, {
+            "count": n,
+            "ar": target_ar,
+            "w": self.stabilize_cache["current_w"],
+            "h": self.stabilize_cache["current_h"],
+            "max_dx": max_dx,
+            "max_dy": max_dy
+        }
+
+    def get_processed_frame(self, frame_idx):
+        if not self.animation_frames or frame_idx >= len(self.animation_frame_order):
+            return None
+        ordered_idx = self.animation_frame_order[frame_idx]
+        frame_path = self.animation_frames[ordered_idx]
+        img = Image.open(frame_path).convert("RGBA")
+
+        if self.stabilize_var.get() and self.stabilize_cache.get("shifts"):
+            shifts = self.stabilize_cache["shifts"]
+            if frame_idx < len(shifts):
+                dx, dy = shifts[frame_idx]
+                cx0 = self.stabilize_cache["cx0"]
+                cy0 = self.stabilize_cache["cy0"]
+                cx = cx0 + dx
+                cy = cy0 + dy
+                cw = self.stabilize_cache.get("current_w", img.width)
+                ch = self.stabilize_cache.get("current_h", img.height)
+
+                x0 = int(round(cx - cw / 2.0))
+                y0 = int(round(cy - ch / 2.0))
+                x1 = x0 + cw
+                y1 = y0 + ch
+                img = img.crop((x0, y0, x1, y1))
+
+        if self.use_bg_var.get() and len(self.animation_frames) > 0:
+            try:
+                bg_idx = int(self.bg_frame_index_var.get())
+                if bg_idx < 1: bg_idx = 1
+                if bg_idx > len(self.animation_frames): bg_idx = len(self.animation_frames)
+            except ValueError:
+                bg_idx = 1
+            bg_path = self.animation_frames[self.animation_frame_order[bg_idx - 1]]
+            try:
+                background = Image.open(bg_path).convert("RGBA")
+                if self.stabilize_var.get() and self.stabilize_cache.get("shifts") and (bg_idx - 1) < len(self.stabilize_cache["shifts"]):
+                    bg_dx, bg_dy = self.stabilize_cache["shifts"][bg_idx - 1]
+                    bg_cx = self.stabilize_cache["cx0"] + bg_dx
+                    bg_cy = self.stabilize_cache["cy0"] + bg_dy
+                    bg_cw = self.stabilize_cache.get("current_w", background.width)
+                    bg_ch = self.stabilize_cache.get("current_h", background.height)
+                    bg_x0 = int(round(bg_cx - bg_cw / 2.0))
+                    bg_y0 = int(round(bg_cy - bg_ch / 2.0))
+                    background = background.crop((bg_x0, bg_y0, bg_x0 + bg_cw, bg_y0 + bg_ch))
+                bg_w, bg_h = background.size
+                composite = background.copy()
+                bx = (bg_w - img.width) // 2
+                by = (bg_h - img.height) // 2
+                composite.paste(img, (bx, by), img)
+                img = composite
+            except Exception:
+                pass
+
+        return img
+
+    def save_stabilized_frames_dialog(self):
+        if not self.animation_frames:
+            messagebox.showwarning("No Frames", "No frames loaded to stabilize.")
+            return
+        if not self.stabilize_cache.get("shifts"):
+            self.run_auto_stabilization()
+            if not self.stabilize_cache.get("shifts"):
+                return
+        out_dir = filedialog.askdirectory(title="Select Folder to Save Stabilized Frames")
+        if not out_dir:
+            return
+        cw = self.stabilize_cache.get("current_w", "unknown")
+        ch = self.stabilize_cache.get("current_h", "unknown")
+        count = 0
+        for i in range(len(self.animation_frame_order)):
+            frame = self.get_processed_frame(i)
+            if frame:
+                pad_len = len(str(len(self.animation_frame_order)))
+                fname = f"stabilized_{str(count + 1).zfill(pad_len)}.png"
+                frame.save(os.path.join(out_dir, fname))
+                count += 1
+        messagebox.showinfo("Stabilized Frames Saved", f"Successfully saved {count} stabilized frames ({cw}x{ch}) to:\n{out_dir}")
 
     def move_frame_up(self):
         sel = self.frame_listbox.curselection()
@@ -2501,47 +2849,11 @@ class ImageSlicerApp:
         if start > end:
             start, end = end, start
             
-        ordered_paths = ordered_paths[start - 1:end]
-
-        use_bg = self.use_bg_var.get() and len(self.animation_frames) > 0
-
-        if use_bg:
-            try:
-                bg_idx = int(self.bg_frame_index_var.get())
-                if bg_idx < 1: bg_idx = 1
-                if bg_idx > len(self.animation_frames): bg_idx = len(self.animation_frames)
-            except ValueError:
-                bg_idx = 1
-            bg_path = self.animation_frames[self.animation_frame_order[bg_idx - 1]]
-            try:
-                background = Image.open(bg_path).convert("RGBA")
-            except Exception as e:
-                messagebox.showerror("Error",
-                    f"Could not open background frame image:\n{bg_path}\n{e}")
-                return
-            bg_w, bg_h = background.size
-            frames = []
-            for frame_path in ordered_paths:
-                try:
-                    sprite    = Image.open(frame_path).convert("RGBA")
-                    composite = background.copy()
-                    x = (bg_w - sprite.width)  // 2
-                    y = (bg_h - sprite.height) // 2
-                    composite.paste(sprite, (x, y), sprite)
-                    frames.append(composite)
-                except Exception as e:
-                    messagebox.showerror("Error",
-                        f"Could not open frame:\n{frame_path}\n{e}")
-                    return
-        else:
-            frames = []
-            for frame_path in ordered_paths:
-                try:
-                    frames.append(Image.open(frame_path).convert("RGBA"))
-                except Exception as e:
-                    messagebox.showerror("Error",
-                        f"Could not open frame:\n{frame_path}\n{e}")
-                    return
+        frames = []
+        for idx in range(start - 1, end):
+            frame_img = self.get_processed_frame(idx)
+            if frame_img:
+                frames.append(frame_img)
 
         if not frames:
             messagebox.showwarning("No Frames", "No frames to export.")
@@ -2711,26 +3023,10 @@ class ImageSlicerApp:
         n = len(self.animation_frames)
         frame_idx = self.current_anim_frame_idx - 1
         if 0 <= frame_idx < n:
-            ordered_idx = self.animation_frame_order[frame_idx]
-            frame_path = self.animation_frames[ordered_idx]
             try:
-                frame_img = Image.open(frame_path).convert("RGBA")
-                
-                if self.use_bg_var.get() and len(self.animation_frames) > 0:
-                    try:
-                        bg_idx = int(self.bg_frame_index_var.get())
-                        if bg_idx < 1: bg_idx = 1
-                        if bg_idx > len(self.animation_frames): bg_idx = len(self.animation_frames)
-                    except ValueError:
-                        bg_idx = 1
-                    bg_path = self.animation_frames[self.animation_frame_order[bg_idx - 1]]
-                    background = Image.open(bg_path).convert("RGBA")
-                    bg_w, bg_h = background.size
-                    comp = background.copy()
-                    x = (bg_w - frame_img.width) // 2
-                    y = (bg_h - frame_img.height) // 2
-                    comp.paste(frame_img, (x, y), frame_img)
-                    frame_img = comp
+                frame_img = self.get_processed_frame(frame_idx)
+                if not frame_img:
+                    return
                 
                 cw = self.canvas_container.winfo_width()
                 ch = self.canvas_container.winfo_height()
@@ -2961,26 +3257,9 @@ class ImageSlicerApp:
             })
             
             try:
-                img = Image.open(frame_path).convert("RGBA")
-                
-                if self.use_bg_var.get() and len(self.animation_frames) > 0:
-                    try:
-                        bg_idx = int(self.bg_frame_index_var.get())
-                        if bg_idx < 1: bg_idx = 1
-                        if bg_idx > len(self.animation_frames): bg_idx = len(self.animation_frames)
-                    except ValueError:
-                        bg_idx = 1
-                    bg_path = self.animation_frames[self.animation_frame_order[bg_idx - 1]]
-                    try:
-                        bg = Image.open(bg_path).convert("RGBA")
-                        bg_w, bg_h = bg.size
-                        comp = bg.copy()
-                        bx = (bg_w - img.width) // 2
-                        by = (bg_h - img.height) // 2
-                        comp.paste(img, (bx, by), img)
-                        img = comp
-                    except Exception:
-                        pass
+                img = self.get_processed_frame(i)
+                if not img:
+                    continue
                 
                 img.thumbnail((cell_w, cell_h), Image.Resampling.LANCZOS)
                 
