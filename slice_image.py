@@ -9,16 +9,16 @@ from PIL import Image, ImageTk, ImageDraw
 # ---------------------------------------------------------------------------
 # Color Palette
 # ---------------------------------------------------------------------------
-BG        = "#f0f2f5"  # Soft light grey background
-SURFACE   = "#ffffff"  # Crisp white for main surface cards and canvas background
-CARD      = "#e5e5ea"  # Muted grey for containers/panels
-ACCENT    = "#007aff"  # Beautiful system blue
-ACCENT2   = "#5856d6"  # Indigo for secondary actions
-TEXT      = "#1c1c1e"  # Dark grey/black for primary text
-SUBTEXT   = "#3a3a3c"  # Darker medium grey for secondary readable text (highly readable!)
-GREEN     = "#28a745"  # Forest green for lines/borders
-BORDER    = "#d1d1d6"  # Muted divider borders
-CANVAS_BG = "#e5e5ea"  # Muted light grey background for the preview canvas
+BG        = "#1a1a2e"  # Very dark navy background
+SURFACE   = "#16213e"  # Dark blue-gray surface panel
+CARD      = "#0f3460"  # Section card containers
+ACCENT    = "#e94560"  # Vibrant red-pink for primary actions / highlights
+ACCENT2   = "#533483"  # Deep purple for secondary actions
+TEXT      = "#ffffff"  # Crisp white text
+SUBTEXT   = "#a0a0b0"  # Muted readable text
+GREEN     = "#00ff88"  # Neon green for grid lines / success
+BORDER    = "#2a2a4a"  # Crisp borders
+CANVAS_BG = "#0d1117"  # Deep dark canvas background
 
 
 # ---------------------------------------------------------------------------
@@ -88,8 +88,8 @@ class ImageSlicerApp:
         self.extract_color_var        = tk.StringVar(value="#ffffff")
         self.extract_tol_var          = tk.DoubleVar(value=30.0)
 
-        # Apply light style
-        self.apply_light_style()
+        # Apply dark style
+        self.apply_dark_style()
 
         # Root grid
         self.root.columnconfigure(0, weight=1)
@@ -127,32 +127,34 @@ class ImageSlicerApp:
     # -----------------------------------------------------------------------
     # DARK STYLE
     # -----------------------------------------------------------------------
-    def apply_light_style(self):
+    def apply_dark_style(self):
         self.style = ttk.Style()
         self.style.theme_use("clam")
         self.style.configure("TFrame",            background=BG)
         self.style.configure("TLabel",            background=BG, foreground=TEXT)
-        self.style.configure("TButton",           background=SURFACE, foreground=TEXT,
+        self.style.configure("TButton",           background=CARD, foreground=TEXT,
                                                   bordercolor=BORDER, focuscolor=ACCENT, padding=6)
-        self.style.map("TButton",                 background=[("active", CARD), ("pressed", ACCENT)])
+        self.style.map("TButton",                 background=[("active", ACCENT2), ("pressed", ACCENT)],
+                                                  foreground=[("active", "white")])
         self.style.configure("Accent.TButton",    background=ACCENT, foreground="white",
-                                                  font=("Helvetica", 10, "bold"), padding=8)
-        self.style.map("Accent.TButton",          background=[("active", "#005ecb"), ("pressed", "#004b9b")])
+                                                  font=("Helvetica", 10, "bold"), padding=8, bordercolor=ACCENT)
+        self.style.map("Accent.TButton",          background=[("active", "#d6304d"), ("pressed", "#b8243c")],
+                                                  foreground=[("active", "white")])
         self.style.configure("Stop.TButton",      background="#ff3b30", foreground="white",
                                                   font=("Helvetica", 9, "bold"), padding=6)
         self.style.map("Stop.TButton",            background=[("active", "#ff453a"), ("pressed", "#d6241a")])
         self.style.configure("Secondary.TButton", background=ACCENT2, foreground="white", padding=6)
-        self.style.map("Secondary.TButton",       background=[("active", "#4745ab")])
-        self.style.configure("TEntry",            fieldbackground=SURFACE, foreground=TEXT,
+        self.style.map("Secondary.TButton",       background=[("active", "#6c45ab")])
+        self.style.configure("TEntry",            fieldbackground=CARD, foreground=TEXT,
                                                   insertcolor=TEXT, bordercolor=BORDER)
         self.style.configure("TNotebook",         background=BG, bordercolor=BORDER)
         self.style.configure("TNotebook.Tab",     background=CARD, foreground=SUBTEXT,
                                                   padding=[12, 6])
-        self.style.map("TNotebook.Tab",           background=[("selected", SURFACE)],
-                                                  foreground=[("selected", TEXT)])
-        self.style.configure("TScrollbar",        background=SURFACE, troughcolor=BG,
+        self.style.map("TNotebook.Tab",           background=[("selected", ACCENT)],
+                                                  foreground=[("selected", "white")])
+        self.style.configure("TScrollbar",        background=CARD, troughcolor=BG,
                                                   bordercolor=BORDER, arrowcolor=TEXT)
-        self.style.configure("TSpinbox",          fieldbackground=SURFACE, foreground=TEXT,
+        self.style.configure("TSpinbox",          fieldbackground=CARD, foreground=TEXT,
                                                   bordercolor=BORDER, arrowcolor=TEXT)
         self.style.configure("TLabelframe",       background=BG, bordercolor=BORDER)
         self.style.configure("TLabelframe.Label", background=BG, foreground=ACCENT)
@@ -251,8 +253,13 @@ class ImageSlicerApp:
         )
 
     def _dark_btn(self, parent, text, command, bg=None, fg=None,
-                  font=None, padx=None, pady=None, default=None):
-        return ttk.Button(parent, text=text, command=command, default=default)
+                  font=None, padx=None, pady=None, default=None, style=None):
+        btn_style = style or "TButton"
+        if default == "active" or bg == ACCENT:
+            btn_style = "Accent.TButton"
+        elif bg == ACCENT2:
+            btn_style = "Secondary.TButton"
+        return ttk.Button(parent, text=text, command=command, style=btn_style)
 
     # -----------------------------------------------------------------------
     # TAB 1: SLICE
@@ -379,9 +386,9 @@ class ImageSlicerApp:
 
         # Slice button
         tk.Frame(parent, bg=BORDER, height=1).pack(fill=tk.X, padx=12, pady=(12, 8))
-        ttk.Button(parent, text="✂  Slice Image", command=self.slice_image,
-                   default="active"
-                   ).pack(fill=tk.X, padx=12, pady=(0, 6), ipady=6)
+        self._dark_btn(parent, "✂  Slice Image", self.slice_image,
+                       default="active"
+                       ).pack(fill=tk.X, padx=12, pady=(0, 6), ipady=6)
 
         self.status_label = tk.Label(
             parent, text="Select an image file to begin.",
@@ -512,9 +519,9 @@ class ImageSlicerApp:
         )
         self.preview_gif_btn.pack(fill=tk.X, padx=12, pady=(6, 2), ipady=2)
 
-        ttk.Button(parent, text="🎬  Export GIF", command=self.export_gif,
-                   default="active"
-                   ).pack(fill=tk.X, padx=12, pady=(4, 14), ipady=5)
+        self._dark_btn(parent, "🎬  Export GIF", self.export_gif,
+                       default="active"
+                       ).pack(fill=tk.X, padx=12, pady=(4, 14), ipady=5)
 
     # -----------------------------------------------------------------------
     # TAB 3: SETTINGS
