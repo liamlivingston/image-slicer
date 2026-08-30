@@ -437,6 +437,8 @@ class ImageSlicerApp:
             side=tk.LEFT, fill=tk.X, expand=True, ipady=4)
         self._dark_btn(row_f, "Browse…", self.browse_file).pack(
             side=tk.LEFT, padx=(6, 0))
+        self._dark_btn(row_f, "Demo", self.load_demo_grid).pack(
+            side=tk.LEFT, padx=(4, 0))
 
         # Grid Dimensions
         self._section_label(parent, "Grid Dimensions")
@@ -966,12 +968,17 @@ class ImageSlicerApp:
             fill=TEXT, font=("Helvetica", 10), justify=tk.LEFT
         )
 
-        # Direct Browse button right inside the canvas card
+        # Direct Browse button and Load Demo Grid button inside placeholder card
         self.placeholder_btn = ttk.Button(
-            self.canvas, text="📂  Browse Image File…",
+            self.canvas, text="📂  Browse File…",
             command=self.browse_file, style="Accent.TButton"
         )
-        self.canvas.create_window(cx, y2 - 40, window=self.placeholder_btn, width=220, height=36)
+        self.demo_btn = ttk.Button(
+            self.canvas, text="🎮  Load Demo Grid",
+            command=self.load_demo_grid
+        )
+        self.canvas.create_window(cx - 105, y2 - 40, window=self.placeholder_btn, width=170, height=36)
+        self.canvas.create_window(cx + 105, y2 - 40, window=self.demo_btn, width=170, height=36)
 
     # -----------------------------------------------------------------------
     # ZOOM / PAN
@@ -1085,6 +1092,55 @@ class ImageSlicerApp:
     # -----------------------------------------------------------------------
     # BROWSE HELPERS
     # -----------------------------------------------------------------------
+    def load_file_path(self, filename):
+        if not filename:
+            return False
+        self.file_path_var.set(filename)
+        try:
+            self.original_img = Image.open(filename)
+            self.zoom_level = 1.0
+            self.detected_col_groups       = None
+            self.detected_row_groups       = None
+            self.detected_border_x_val     = None
+            self.detected_border_y_val     = None
+            self.detected_outer_borders    = None
+            self.manual_col_left_offsets   = []
+            self.manual_col_right_offsets  = []
+            self.manual_row_top_offsets    = []
+            self.manual_row_bottom_offsets = []
+            self.selected_line = None
+            self.rescale_preview_image()
+            self.update_preview()
+            self.status_label.config(
+                text=(f"Loaded: {os.path.basename(filename)} "
+                      f"({self.original_img.width}x{self.original_img.height})"),
+                fg=GREEN
+            )
+            if not self.custom_output_dir:
+                self.output_dir_var.set("[sliced-images/ in app directory]")
+            return True
+        except Exception as e:
+            self.original_img = None
+            self.preview_base_img = None
+            self.draw_placeholder()
+            messagebox.showerror("Error", f"Failed to load image:\n{e}")
+            return False
+
+    def load_demo_grid(self):
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        candidates = [
+            os.path.join(script_dir, "demo_grid.png"),
+            os.path.join(get_app_run_dir(), "demo_grid.png"),
+            os.path.join(script_dir, "ChatGPT Image Aug 13, 2026 at 08_52_50 PM.png"),
+            os.path.join(get_app_run_dir(), "ChatGPT Image Aug 13, 2026 at 08_52_50 PM.png")
+        ]
+        for p in candidates:
+            if os.path.exists(p):
+                if self.load_file_path(p):
+                    self.auto_detect_borders()
+                return
+        messagebox.showinfo("Demo Grid", "demo_grid.png was not found in the application directory.")
+
     def browse_file(self):
         filename = filedialog.askopenfilename(
             title="Select Grid Image to Slice",
@@ -1093,33 +1149,7 @@ class ImageSlicerApp:
             initialdir=os.getcwd()
         )
         if filename:
-            self.file_path_var.set(filename)
-            try:
-                self.original_img = Image.open(filename)
-                self.zoom_level = 1.0
-                self.detected_col_groups       = None
-                self.detected_row_groups       = None
-                self.detected_border_x_val     = None
-                self.detected_border_y_val     = None
-                self.manual_col_left_offsets   = []
-                self.manual_col_right_offsets  = []
-                self.manual_row_top_offsets    = []
-                self.manual_row_bottom_offsets = []
-                self.selected_line = None
-                self.rescale_preview_image()
-                self.update_preview()
-                self.status_label.config(
-                    text=(f"Loaded: {os.path.basename(filename)} "
-                          f"({self.original_img.width}x{self.original_img.height})"),
-                    fg=GREEN
-                )
-            except Exception as e:
-                self.original_img = None
-                self.preview_base_img = None
-                self.draw_placeholder()
-                messagebox.showerror("Error", f"Failed to load image:\n{e}")
-            if not self.custom_output_dir:
-                self.output_dir_var.set("[sliced-images/ in app directory]")
+            self.load_file_path(filename)
 
     def browse_output_dir(self):
         directory = filedialog.askdirectory(
@@ -1477,6 +1507,7 @@ class ImageSlicerApp:
                 self.detected_row_groups       = result["row_groups"]
                 self.detected_border_x_val     = result["border_x"]
                 self.detected_border_y_val     = result["border_y"]
+                self.detected_outer_borders    = result.get("outer_borders", {})
                 self.manual_col_left_offsets   = [0] * len(result["col_groups"])
                 self.manual_col_right_offsets  = [0] * len(result["col_groups"])
                 self.manual_row_top_offsets    = [0] * len(result["row_groups"])
@@ -1845,7 +1876,7 @@ class ImageSlicerApp:
                 is_unif, med = is_line_uniform_col(start - 1)
                 dist = (abs(med[0] - best_color[0]) + abs(med[1] - best_color[1]) +
                         abs(med[2] - best_color[2]) + abs(med[3] - best_color[3]))
-                if is_unif and dist <= 245:
+                if is_unif and dist <= 40:
                     med_diff = (abs(med[0] - last_med[0]) + abs(med[1] - last_med[1]) +
                                 abs(med[2] - last_med[2]) + abs(med[3] - last_med[3]))
                     if med_diff < 15 and dist > 80:
@@ -1859,7 +1890,7 @@ class ImageSlicerApp:
                 is_unif, med = is_line_uniform_col(end + 1)
                 dist = (abs(med[0] - best_color[0]) + abs(med[1] - best_color[1]) +
                         abs(med[2] - best_color[2]) + abs(med[3] - best_color[3]))
-                if is_unif and dist <= 245:
+                if is_unif and dist <= 40:
                     med_diff = (abs(med[0] - last_med[0]) + abs(med[1] - last_med[1]) +
                                 abs(med[2] - last_med[2]) + abs(med[3] - last_med[3]))
                     if med_diff < 15 and dist > 80:
@@ -1882,7 +1913,7 @@ class ImageSlicerApp:
                 is_unif, med = is_line_uniform_row(start - 1)
                 dist = (abs(med[0] - best_color[0]) + abs(med[1] - best_color[1]) +
                         abs(med[2] - best_color[2]) + abs(med[3] - best_color[3]))
-                if is_unif and dist <= 245:
+                if is_unif and dist <= 40:
                     med_diff = (abs(med[0] - last_med[0]) + abs(med[1] - last_med[1]) +
                                 abs(med[2] - last_med[2]) + abs(med[3] - last_med[3]))
                     if med_diff < 15 and dist > 80:
@@ -1896,7 +1927,7 @@ class ImageSlicerApp:
                 is_unif, med = is_line_uniform_row(end + 1)
                 dist = (abs(med[0] - best_color[0]) + abs(med[1] - best_color[1]) +
                         abs(med[2] - best_color[2]) + abs(med[3] - best_color[3]))
-                if is_unif and dist <= 245:
+                if is_unif and dist <= 40:
                     med_diff = (abs(med[0] - last_med[0]) + abs(med[1] - last_med[1]) +
                                 abs(med[2] - last_med[2]) + abs(med[3] - last_med[3]))
                     if med_diff < 15 and dist > 80:
@@ -1908,64 +1939,73 @@ class ImageSlicerApp:
             expanded_row_groups.append(list(range(start, end + 1)))
         row_groups = expanded_row_groups
 
-        has_left_outer  = False
+        # Classify outer edge borders vs internal dividers
+        has_left_outer = False
         has_right_outer = False
-        if col_groups:
-            if any(i in col_groups[0] for i in range(5)):
+        internal_col_groups = []
+        outer_left = None
+        outer_right = None
+        for g in col_groups:
+            if g[0] <= 5 or any(i in g for i in range(6)):
                 has_left_outer = True
-            if any((W - 1 - i) in col_groups[-1] for i in range(5)):
+                outer_left = g
+            elif g[-1] >= W - 6 or any((W - 1 - i) in g for i in range(6)):
                 has_right_outer = True
+                outer_right = g
+            else:
+                internal_col_groups.append(g)
 
-        has_top_outer    = False
+        has_top_outer = False
         has_bottom_outer = False
-        if row_groups:
-            if any(i in row_groups[0] for i in range(5)):
+        internal_row_groups = []
+        outer_top = None
+        outer_bottom = None
+        for g in row_groups:
+            if g[0] <= 5 or any(i in g for i in range(6)):
                 has_top_outer = True
-            if any((H - 1 - i) in row_groups[-1] for i in range(5)):
+                outer_top = g
+            elif g[-1] >= H - 6 or any((H - 1 - i) in g for i in range(6)):
                 has_bottom_outer = True
+                outer_bottom = g
+            else:
+                internal_row_groups.append(g)
 
-        col_widths = [len(g) for g in expanded_col_groups]
-        row_widths = [len(g) for g in expanded_row_groups]
+        # A grid has layout "all" only if outer borders enclose both sides of both dimensions
+        if (has_left_outer and has_right_outer) and (has_top_outer and has_bottom_outer):
+            border_layout = "all"
+            final_col_groups = col_groups
+            final_row_groups = row_groups
+            detected_cols = max(1, len(final_col_groups) - 1)
+            detected_rows = max(1, len(final_row_groups) - 1)
+        else:
+            border_layout = "between"
+            final_col_groups = internal_col_groups
+            final_row_groups = internal_row_groups
+            detected_cols = len(final_col_groups) + 1 if final_col_groups else 1
+            detected_rows = len(final_row_groups) + 1 if final_row_groups else 1
+
+        col_widths = [len(g) for g in final_col_groups]
+        row_widths = [len(g) for g in final_row_groups]
 
         detected_border_x = (int(sorted(col_widths)[len(col_widths) // 2])
                               if col_widths else 0)
         detected_border_y = (int(sorted(row_widths)[len(row_widths) // 2])
                               if row_widths else 0)
 
-        N_col_groups = len(col_groups)
-        if N_col_groups > 0:
-            if has_left_outer and has_right_outer:
-                detected_cols = N_col_groups - 1
-                border_layout = "all"
-            elif not has_left_outer and not has_right_outer:
-                detected_cols = N_col_groups + 1
-                border_layout = "between"
-            else:
-                detected_cols = N_col_groups
-                border_layout = "all"
-        else:
-            detected_cols = 1
-            border_layout = "between"
-
-        N_row_groups = len(row_groups)
-        if N_row_groups > 0:
-            if has_top_outer and has_bottom_outer:
-                detected_rows = N_row_groups - 1
-            elif not has_top_outer and not has_bottom_outer:
-                detected_rows = N_row_groups + 1
-            else:
-                detected_rows = N_row_groups
-        else:
-            detected_rows = 1
-
         return {
-            "cols":       detected_cols,
-            "rows":       detected_rows,
-            "border_x":   detected_border_x,
-            "border_y":   detected_border_y,
-            "layout":     border_layout,
-            "col_groups": col_groups,
-            "row_groups": row_groups,
+            "cols":          detected_cols,
+            "rows":          detected_rows,
+            "border_x":      detected_border_x,
+            "border_y":      detected_border_y,
+            "layout":        border_layout,
+            "col_groups":    final_col_groups,
+            "row_groups":    final_row_groups,
+            "outer_borders": {
+                "left":   outer_left,
+                "right":  outer_right,
+                "top":    outer_top,
+                "bottom": outer_bottom
+            }
         }
 
     # -----------------------------------------------------------------------
@@ -2077,9 +2117,16 @@ class ImageSlicerApp:
             borders.append((start, end))
 
         cells = []
+        outer_borders = getattr(self, "detected_outer_borders", {}) or {}
+        outer_start = outer_borders.get("left" if is_col else "top")
+        outer_end = outer_borders.get("right" if is_col else "bottom")
+
         if has_outer_start:
             start_idx     = 1
             current_start = borders[0][1] + 1
+        elif outer_start:
+            start_idx     = 0
+            current_start = outer_start[-1] + 1
         else:
             start_idx     = 0
             current_start = 0
@@ -2090,7 +2137,10 @@ class ImageSlicerApp:
             current_start = borders[i][1] + 1
 
         if not has_outer_end:
-            cells.append((current_start, dim_size - 1))
+            if outer_end:
+                cells.append((current_start, outer_end[0] - 1))
+            else:
+                cells.append((current_start, dim_size - 1))
 
         return cells
 

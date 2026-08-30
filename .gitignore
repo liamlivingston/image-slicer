@@ -26,5 +26,9 @@ sliced-images/
 *.jpeg
 *.png
 
+# Allow demo images
+!demo_grid.png
+!ChatGPT Image Aug 13, 2026 at 08_52_50 PM.png
+
 # Archive files
 *.tar.gz
