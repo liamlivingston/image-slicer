@@ -239,6 +239,9 @@ class ImageSlicerApp:
         self.paned.configure(bg=BG)
         self.canvas.configure(bg=CANVAS_BG)
         self.canvas_container.configure(bg=CANVAS_BG)
+        if hasattr(self, "scroll_canvas"):
+            self.scroll_canvas.configure(bg=BG)
+
 
         def _recolor(w):
             cls = w.winfo_class()
@@ -335,36 +338,76 @@ class ImageSlicerApp:
         self.left_outer.pack_propagate(False)
         self.paned.add(self.left_outer, minsize=350)
 
-        scroll_canvas = tk.Canvas(self.left_outer, bg=BG, highlightthickness=0, bd=0)
-        scrollbar = ttk.Scrollbar(self.left_outer, orient="vertical", command=scroll_canvas.yview)
-        scroll_canvas.configure(yscrollcommand=scrollbar.set)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        scroll_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.scroll_canvas = tk.Canvas(self.left_outer, bg=BG, highlightthickness=0, bd=0, yscrollincrement=1)
+        self.left_scrollbar = ttk.Scrollbar(self.left_outer, orient="vertical", command=self.scroll_canvas.yview)
+        self.scroll_canvas.configure(yscrollcommand=self.left_scrollbar.set)
+        self.left_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.scroll_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        self.left_frame = tk.Frame(scroll_canvas, bg=BG)
-        scroll_win = scroll_canvas.create_window((0, 0), window=self.left_frame, anchor="nw")
+        self.left_frame = tk.Frame(self.scroll_canvas, bg=BG)
+        scroll_win = self.scroll_canvas.create_window((0, 0), window=self.left_frame, anchor="nw")
 
-        def _on_frame_cfg(event):
-            scroll_canvas.configure(scrollregion=scroll_canvas.bbox("all"))
+        def _on_frame_cfg(event=None):
+            self.scroll_canvas.configure(scrollregion=self.scroll_canvas.bbox("all"))
 
-        def _on_canvas_cfg(event):
-            scroll_canvas.itemconfig(scroll_win, width=event.width)
+        def _on_canvas_cfg(event=None):
+            self.scroll_canvas.itemconfig(scroll_win, width=event.width)
 
         self.left_frame.bind("<Configure>", _on_frame_cfg)
-        scroll_canvas.bind("<Configure>",   _on_canvas_cfg)
+        self.scroll_canvas.bind("<Configure>",   _on_canvas_cfg)
 
-        def _mw(event):
-            if event.num == 4:
-                scroll_canvas.yview_scroll(-1, "units")
+        def _on_left_mousewheel(event):
+            # Check if pointer is physically over the left panel
+            try:
+                x_root = event.x_root
+                y_root = event.y_root
+                lx = self.left_outer.winfo_rootx()
+                ly = self.left_outer.winfo_rooty()
+                lw = self.left_outer.winfo_width()
+                lh = self.left_outer.winfo_height()
+                if not (lx <= x_root <= lx + lw and ly <= y_root <= ly + lh):
+                    return
+            except Exception:
+                return
+
+            # If over frame_listbox specifically, scroll listbox instead
+            try:
+                if hasattr(self, "frame_listbox") and event.widget == self.frame_listbox:
+                    if sys.platform == "darwin":
+                        self.frame_listbox.yview_scroll(int(-1 * event.delta), "units")
+                    elif event.num == 4:
+                        self.frame_listbox.yview_scroll(-1, "units")
+                    elif event.num == 5:
+                        self.frame_listbox.yview_scroll(1, "units")
+                    else:
+                        units = -1 * int(event.delta / 120)
+                        if units == 0 and event.delta != 0:
+                            units = -1 if event.delta > 0 else 1
+                        self.frame_listbox.yview_scroll(units, "units")
+                    return "break"
+            except Exception:
+                pass
+
+            # Calculate scroll distance in pixels (since yscrollincrement=1)
+            if sys.platform == "darwin":
+                if abs(event.delta) < 4:
+                    pixels = -1 * int(math.copysign(26 * abs(event.delta), event.delta)) if event.delta != 0 else 0
+                else:
+                    pixels = -1 * int(event.delta * 7)
+            elif event.num == 4:
+                pixels = -25
             elif event.num == 5:
-                scroll_canvas.yview_scroll(1, "units")
+                pixels = 25
             else:
-                scroll_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+                pixels = -1 * int((event.delta / 120.0) * 30.0) if event.delta != 0 else 0
 
-        for w in (scroll_canvas, self.left_frame):
-            w.bind("<MouseWheel>", _mw)
-            w.bind("<Button-4>",   _mw)
-            w.bind("<Button-5>",   _mw)
+            self.scroll_canvas.yview_scroll(pixels, "units")
+            return "break"
+
+        # Bind mousewheel globally for when cursor is over the left panel
+        self.root.bind_all("<MouseWheel>", _on_left_mousewheel, add="+")
+        self.root.bind_all("<Button-4>",   _on_left_mousewheel, add="+")
+        self.root.bind_all("<Button-5>",   _on_left_mousewheel, add="+")
 
         # Title
         tk.Label(self.left_frame, text="Image Grid Slicer",
@@ -388,14 +431,14 @@ class ImageSlicerApp:
         self._build_animate_tab(self.tab_animate)
         self._build_extract_tab(self.tab_extract)
 
-        # Recursively bind MouseWheel events to all children of self.notebook
-        def bind_mousewheel_recursive(widget):
-            widget.bind("<MouseWheel>", _mw, add="+")
-            widget.bind("<Button-4>", _mw, add="+")
-            widget.bind("<Button-5>", _mw, add="+")
+        # Recursively bind MouseWheel events to all children of self.left_outer as direct fallback
+        def _bind_mousewheel_recursive(widget):
+            widget.bind("<MouseWheel>", _on_left_mousewheel, add="+")
+            widget.bind("<Button-4>",   _on_left_mousewheel, add="+")
+            widget.bind("<Button-5>",   _on_left_mousewheel, add="+")
             for child in widget.winfo_children():
-                bind_mousewheel_recursive(child)
-        bind_mousewheel_recursive(self.notebook)
+                _bind_mousewheel_recursive(child)
+        _bind_mousewheel_recursive(self.left_outer)
 
     # -----------------------------------------------------------------------
     # WIDGET HELPERS
@@ -2533,17 +2576,19 @@ class ImageSlicerApp:
             messagebox.showwarning("No Frames", "Please load animation frames first.")
             return
 
-        self.status_label.config(text="Analyzing cells & trimming overhang… please wait…", fg=ACCENT)
+        self.status_label.config(text="Tracking motion points all around frame… please wait…", fg=ACCENT)
         self.root.update_idletasks()
 
         success, info = self.calculate_stabilization()
         if success:
             self.stabilize_var.set(True)
+            pts_cnt = info.get("tracked_points", 0)
+            avg_inl = info.get("avg_inliers", 0)
             self.stab_info_label.config(
-                text=f"Matched {info['count']} frames to {info['w']}x{info['h']} (preserving smaller cells) | Trimmed overhang ({info['trim_h']}px)",
+                text=f"Stabilized {info['count']} frames ({info['w']}x{info['h']}) • Tracked {pts_cnt} points (avg {avg_inl} background matches)",
                 fg=GREEN
             )
-            self.status_label.config(text="Stabilized and matched aspect ratio, preserving smaller cells.", fg=GREEN)
+            self.status_label.config(text=f"Stabilized {info['count']} frames: background motion locked in place.", fg=GREEN)
             self.update_preview()
         else:
             messagebox.showerror("Stabilization Failed", info.get("error", "Failed to compute stabilization."))
@@ -2565,117 +2610,237 @@ class ImageSlicerApp:
         widths = [im.width for im in loaded_images]
         heights = [im.height for im in loaded_images]
 
-        # Prioritize smaller cells: target dimensions match the smaller/standard cells
-        # This ensures smaller cells are NOT cropped, and extra overhang on larger cells is trimmed away!
-        target_w = min(widths)
-        target_h = min(heights)
-        target_ar = target_w / target_h
-
-        # Find a reference frame that has standard/smaller dimensions
+        # Check if user specified a background frame to serve as reference
         ref_idx = 0
-        for idx in range(n):
-            if loaded_images[idx].width == target_w or loaded_images[idx].height == target_h:
-                ref_idx = idx
-                break
+        if self.use_bg_var.get() and len(ordered_paths) > 0:
+            try:
+                bg_idx = int(self.bg_frame_index_var.get()) - 1
+                if 0 <= bg_idx < n:
+                    ref_idx = bg_idx
+            except (ValueError, TypeError):
+                ref_idx = 0
 
-        ref_gray = loaded_images[ref_idx].convert("L")
+        ref_img = loaded_images[ref_idx]
+        w_ref, h_ref = ref_img.size
         has_np = self._has_numpy()
-        crop_centers = []
+
+        shifts = [(0.0, 0.0) for _ in range(n)]
+        inlier_counts = [0 for _ in range(n)]
+        tracked_points_count = 0
 
         if has_np:
             import numpy as np
-            ref_arr = np.array(ref_gray, dtype=float)
-            ref_sub = ref_arr[:target_h:2, :target_w:2]
+            from numpy.lib.stride_tricks import sliding_window_view
+
+            ref_arr = np.array(ref_img.convert("L"), dtype=np.float32)
+
+            # Adaptive search and patch radius
+            patch_r = min(12, max(6, int(min(w_ref, h_ref) * 0.04)))
+            search_r = min(28, max(12, int(min(w_ref, h_ref) * 0.09)))
+            margin_x = patch_r + search_r + 2
+            margin_y = patch_r + search_r + 2
+
+            if w_ref <= 2 * margin_x or h_ref <= 2 * margin_y:
+                search_r = max(4, min(w_ref, h_ref) // 8)
+                patch_r = max(4, min(w_ref, h_ref) // 10)
+                margin_x = patch_r + search_r + 1
+                margin_y = patch_r + search_r + 1
+
+            # Distribute tracking points all around the frame
+            n_grid_x = min(16, max(8, int(w_ref // 22)))
+            n_grid_y = min(16, max(8, int(h_ref // 22)))
+            gx_coords = np.linspace(margin_x, w_ref - margin_x - 1, n_grid_x, dtype=int)
+            gy_coords = np.linspace(margin_y, h_ref - margin_y - 1, n_grid_y, dtype=int)
+
+            cand_points = []
+            for gy in gy_coords:
+                for gx in gx_coords:
+                    patch = ref_arr[gy - patch_r : gy + patch_r + 1, gx - patch_r : gx + patch_r + 1]
+                    cand_points.append((gx, gy, float(np.std(patch))))
+
+            # Filter points to those with texture
+            textured = [(x, y) for x, y, s in cand_points if s >= 6.0]
+            if len(textured) < 15:
+                cand_points.sort(key=lambda item: item[2], reverse=True)
+                tracking_points = [(x, y) for x, y, s in cand_points[:max(15, len(cand_points) // 2)]]
+            else:
+                tracking_points = textured
+
+            tracked_points_count = len(tracking_points)
+
+            def _track_frame_motion(tmpl_arr, tgt_arr):
+                t_h, t_w = tgt_arr.shape
+                ph, pw = 2 * patch_r + 1, 2 * patch_r + 1
+                vectors = []
+
+                for gx, gy in tracking_points:
+                    patch = tmpl_arr[gy - patch_r : gy + patch_r + 1, gx - patch_r : gx + patch_r + 1]
+                    ymin = gy - patch_r - search_r
+                    ymax = gy + patch_r + search_r + 1
+                    xmin = gx - patch_r - search_r
+                    xmax = gx + patch_r + search_r + 1
+
+                    if ymin < 0 or ymax > t_h or xmin < 0 or xmax > t_w:
+                        continue
+
+                    search_win = tgt_arr[ymin:ymax, xmin:xmax]
+                    windows = sliding_window_view(search_win, (ph, pw))
+                    mads = np.mean(np.abs(windows - patch), axis=(2, 3))
+
+                    min_idx = np.unravel_index(np.argmin(mads), mads.shape)
+                    my, mx = min_idx
+
+                    # Sub-pixel quadratic refinement
+                    sub_dx = 0.0
+                    if 0 < mx < mads.shape[1] - 1:
+                        vl, vm, vr = mads[my, mx - 1], mads[my, mx], mads[my, mx + 1]
+                        denom = vl - 2 * vm + vr
+                        if denom > 1e-4:
+                            sub_dx = np.clip(0.5 * (vl - vr) / denom, -0.5, 0.5)
+
+                    sub_dy = 0.0
+                    if 0 < my < mads.shape[0] - 1:
+                        vl, vm, vr = mads[my - 1, mx], mads[my, mx], mads[my + 1, mx]
+                        denom = vl - 2 * vm + vr
+                        if denom > 1e-4:
+                            sub_dy = np.clip(0.5 * (vl - vr) / denom, -0.5, 0.5)
+
+                    best_dx = float(mx - search_r) + float(sub_dx)
+                    best_dy = float(my - search_r) + float(sub_dy)
+                    vectors.append((best_dx, best_dy, float(mads[min_idx])))
+
+                if not vectors:
+                    return 0.0, 0.0, 0, 0
+
+                # Majority consensus filtering: throw out motions that do not match
+                tol = 1.6
+                best_inliers = []
+                for cand_dx, cand_dy, _ in vectors:
+                    inliers = [v for v in vectors if (v[0] - cand_dx)**2 + (v[1] - cand_dy)**2 <= tol**2]
+                    if len(inliers) > len(best_inliers):
+                        best_inliers = inliers
+
+                if best_inliers and len(best_inliers) >= 3:
+                    avg_dx = float(np.mean([v[0] for v in best_inliers]))
+                    avg_dy = float(np.mean([v[1] for v in best_inliers]))
+                    return avg_dx, avg_dy, len(best_inliers), len(vectors)
+                return 0.0, 0.0, 0, len(vectors)
+
+            inlier_counts[ref_idx] = tracked_points_count
+            prev_arr = ref_arr
+            cum_shift_x, cum_shift_y = 0.0, 0.0
 
             for i in range(n):
-                cur_img = loaded_images[i]
-                cur_w, cur_h = cur_img.size
-                max_x0 = max(0, cur_w - target_w)
-                max_y0 = max(0, cur_h - target_h)
-
-                if max_x0 == 0 and max_y0 == 0:
-                    crop_centers.append((cur_w / 2.0, cur_h / 2.0))
+                if i == ref_idx:
+                    shifts[i] = (0.0, 0.0)
+                    inlier_counts[i] = tracked_points_count
                     continue
+                cur_arr = np.array(loaded_images[i].convert("L"), dtype=np.float32)
+                dx_dir, dy_dir, inl_dir, tot_dir = _track_frame_motion(ref_arr, cur_arr)
 
-                f_arr = np.array(cur_img.convert("L"), dtype=float)
-                best_diff = 1e12
-                best_x0, best_y0 = 0, 0
-
-                step_y = max(1, max_y0 // 16) if max_y0 > 16 else 1
-                step_x = max(1, max_x0 // 16) if max_x0 > 16 else 1
-
-                for y0 in range(0, max_y0 + 1, step_y):
-                    for x0 in range(0, max_x0 + 1, step_x):
-                        sub = f_arr[y0:y0+target_h:2, x0:x0+target_w:2]
-                        if sub.shape == ref_sub.shape:
-                            diff = np.mean(np.abs(sub - ref_sub))
-                            if diff < best_diff:
-                                best_diff = diff
-                                best_x0 = x0
-                                best_y0 = y0
-
-                fine_x0, fine_y0 = best_x0, best_y0
-                ref_full = ref_arr[:target_h, :target_w]
-                for dy in range(-4, 5):
-                    for dx in range(-4, 5):
-                        tx = max(0, min(max_x0, best_x0 + dx))
-                        ty = max(0, min(max_y0, best_y0 + dy))
-                        sub = f_arr[ty:ty+target_h, tx:tx+target_w]
-                        if sub.shape == ref_full.shape:
-                            diff = np.mean(np.abs(sub - ref_full))
-                            if diff < best_diff:
-                                best_diff = diff
-                                fine_x0 = tx
-                                fine_y0 = ty
-
-                crop_centers.append((fine_x0 + target_w / 2.0, fine_y0 + target_h / 2.0))
+                min_confidence = max(5, int(tracked_points_count * 0.15))
+                if inl_dir >= min_confidence:
+                    shifts[i] = (dx_dir, dy_dir)
+                    inlier_counts[i] = inl_dir
+                else:
+                    # Consecutive fallback if direct has low consensus
+                    dx_con, dy_con, inl_con, tot_con = _track_frame_motion(prev_arr, cur_arr)
+                    cum_shift_x += dx_con
+                    cum_shift_y += dy_con
+                    shifts[i] = (cum_shift_x, cum_shift_y)
+                    inlier_counts[i] = inl_con
+                prev_arr = cur_arr
 
         else:
+            # Pure PIL fallback with point grid template matching
             from PIL import ImageChops, ImageStat
-            ref_sub = ref_gray.crop((0, 0, target_w, target_h))
+
+            ref_gray = ref_img.convert("L")
+            patch_r = 8
+            search_r = 12
+            margin = patch_r + search_r + 2
+
+            gx_coords = [int(x) for x in (margin, w_ref // 4, w_ref // 2, 3 * w_ref // 4, w_ref - margin)]
+            gy_coords = [int(y) for y in (margin, h_ref // 4, h_ref // 2, 3 * h_ref // 4, h_ref - margin)]
+            tracking_points = [(x, y) for gy in gy_coords for x in gx_coords
+                               if 0 <= x - patch_r and x + patch_r < w_ref and 0 <= gy - patch_r and gy + patch_r < h_ref]
+            tracked_points_count = len(tracking_points)
+
             for i in range(n):
-                cur_img = loaded_images[i]
-                cur_w, cur_h = cur_img.size
-                max_x0 = max(0, cur_w - target_w)
-                max_y0 = max(0, cur_h - target_h)
-
-                if max_x0 == 0 and max_y0 == 0:
-                    crop_centers.append((cur_w / 2.0, cur_h / 2.0))
+                if i == ref_idx:
+                    shifts[i] = (0.0, 0.0)
+                    inlier_counts[i] = tracked_points_count
                     continue
+                cur_gray = loaded_images[i].convert("L")
+                cur_w, cur_h = cur_gray.size
+                vectors = []
 
-                best_diff = 1e12
-                best_x0, best_y0 = 0, 0
-                step_y = max(1, max_y0 // 10) if max_y0 > 10 else 1
-                step_x = max(1, max_x0 // 10) if max_x0 > 10 else 1
+                for gx, gy in tracking_points:
+                    patch = ref_gray.crop((gx - patch_r, gy - patch_r, gx + patch_r + 1, gy + patch_r + 1))
+                    best_diff = 1e12
+                    best_dx, best_dy = 0, 0
+                    for dy in range(-search_r, search_r + 1, 2):
+                        for dx in range(-search_r, search_r + 1, 2):
+                            tx = gx + dx
+                            ty = gy + dy
+                            if tx - patch_r < 0 or tx + patch_r + 1 > cur_w or ty - patch_r < 0 or ty + patch_r + 1 > cur_h:
+                                continue
+                            sub = cur_gray.crop((tx - patch_r, ty - patch_r, tx + patch_r + 1, ty + patch_r + 1))
+                            diff = ImageStat.Stat(ImageChops.difference(sub, patch)).sum[0]
+                            if diff < best_diff:
+                                best_diff = diff
+                                best_dx, best_dy = dx, dy
+                    vectors.append((float(best_dx), float(best_dy), best_diff))
 
-                for y0 in range(0, max_y0 + 1, step_y):
-                    for x0 in range(0, max_x0 + 1, step_x):
-                        sub = cur_img.convert("L").crop((x0, y0, x0 + target_w, y0 + target_h))
-                        diff = ImageStat.Stat(ImageChops.difference(sub, ref_sub)).sum[0]
-                        if diff < best_diff:
-                            best_diff = diff
-                            best_x0 = x0
-                            best_y0 = y0
+                tol = 2.0
+                best_inliers = []
+                for cand_dx, cand_dy, _ in vectors:
+                    inliers = [v for v in vectors if (v[0] - cand_dx)**2 + (v[1] - cand_dy)**2 <= tol**2]
+                    if len(inliers) > len(best_inliers):
+                        best_inliers = inliers
 
-                fine_x0, fine_y0 = best_x0, best_y0
-                for dy in range(-3, 4):
-                    for dx in range(-3, 4):
-                        tx = max(0, min(max_x0, best_x0 + dx))
-                        ty = max(0, min(max_y0, best_y0 + dy))
-                        sub = cur_img.convert("L").crop((tx, ty, tx + target_w, ty + target_h))
-                        diff = ImageStat.Stat(ImageChops.difference(sub, ref_sub)).sum[0]
-                        if diff < best_diff:
-                            best_diff = diff
-                            fine_x0 = tx
-                            fine_y0 = ty
+                if best_inliers:
+                    shifts[i] = (
+                        float(sum(v[0] for v in best_inliers) / len(best_inliers)),
+                        float(sum(v[1] for v in best_inliers) / len(best_inliers))
+                    )
+                    inlier_counts[i] = len(best_inliers)
+                else:
+                    shifts[i] = (0.0, 0.0)
+                    inlier_counts[i] = 0
 
-                crop_centers.append((fine_x0 + target_w / 2.0, fine_y0 + target_h / 2.0))
+        # Calculate common intersection bounding box in reference frame coordinate system
+        x_mins = [max(0.0, -dx) for dx, dy in shifts]
+        x_maxs = [loaded_images[i].width - dx for i, (dx, dy) in enumerate(shifts)]
+        y_mins = [max(0.0, -dy) for dx, dy in shifts]
+        y_maxs = [loaded_images[i].height - dy for i, (dx, dy) in enumerate(shifts)]
+
+        x_min = max(0.0, max(x_mins))
+        x_max = min(float(w_ref), min(x_maxs))
+        y_min = max(0.0, max(y_mins))
+        y_max = min(float(h_ref), min(y_maxs))
+
+        w_avail = max(10.0, x_max - x_min)
+        h_avail = max(10.0, y_max - y_min)
+        cx_ref = (x_min + x_max) / 2.0
+        cy_ref = (y_min + y_max) / 2.0
+
+        target_w = int(math.floor(w_avail))
+        target_h = int(math.floor(h_avail))
+        target_ar = target_w / target_h
+
+        crop_centers = [(cx_ref + dx, cy_ref + dy) for dx, dy in shifts]
+        crop_centers_by_path = {ordered_paths[i]: crop_centers[i] for i in range(n)}
 
         self.stabilize_cache = {
             "target_w": target_w,
             "target_h": target_h,
             "target_ar": target_ar,
             "crop_centers": crop_centers,
+            "crop_centers_by_path": crop_centers_by_path,
+            "shifts": shifts,
+            "inlier_counts": inlier_counts,
+            "tracked_points": tracked_points_count,
             "image_sizes": [(im.width, im.height) for im in loaded_images]
         }
 
@@ -2683,6 +2848,7 @@ class ImageSlicerApp:
 
         max_trim_w = max(im.width - target_w for im in loaded_images)
         max_trim_h = max(im.height - target_h for im in loaded_images)
+        avg_inliers = int(round(sum(inlier_counts) / max(1, len(inlier_counts))))
 
         return True, {
             "count": n,
@@ -2690,7 +2856,9 @@ class ImageSlicerApp:
             "w": self.stabilize_cache["current_w"],
             "h": self.stabilize_cache["current_h"],
             "trim_w": max_trim_w,
-            "trim_h": max_trim_h
+            "trim_h": max_trim_h,
+            "tracked_points": tracked_points_count,
+            "avg_inliers": avg_inliers
         }
 
     def get_processed_frame(self, frame_idx):
@@ -2702,33 +2870,48 @@ class ImageSlicerApp:
 
         if self.stabilize_var.get() and self.stabilize_cache.get("crop_centers"):
             crop_centers = self.stabilize_cache["crop_centers"]
-            if frame_idx < len(crop_centers):
+            centers_by_path = self.stabilize_cache.get("crop_centers_by_path", {})
+            if frame_path in centers_by_path:
+                cx, cy = centers_by_path[frame_path]
+            elif frame_idx < len(crop_centers):
                 cx, cy = crop_centers[frame_idx]
-                cw = self.stabilize_cache.get("current_w", img.width)
-                ch = self.stabilize_cache.get("current_h", img.height)
+            else:
+                cx, cy = img.width / 2.0, img.height / 2.0
 
-                x0 = int(round(cx - cw / 2.0))
-                y0 = int(round(cy - ch / 2.0))
-                x1 = x0 + cw
-                y1 = y0 + ch
+            cw = self.stabilize_cache.get("current_w", img.width)
+            ch = self.stabilize_cache.get("current_h", img.height)
 
-                # Clamp within frame bounds
-                if x0 < 0:
-                    x1 -= x0
-                    x0 = 0
-                if y0 < 0:
-                    y1 -= y0
-                    y0 = 0
-                if x1 > img.width:
-                    x0 -= (x1 - img.width)
-                    x1 = img.width
-                if y1 > img.height:
-                    y0 -= (y1 - img.height)
-                    y1 = img.height
-                x0 = max(0, x0)
-                y0 = max(0, y0)
+            x0 = int(round(cx - cw / 2.0))
+            y0 = int(round(cy - ch / 2.0))
+            x1 = x0 + cw
+            y1 = y0 + ch
 
-                img = img.crop((x0, y0, x1, y1))
+            # Clamp within frame bounds without jitter
+            if x0 < 0:
+                x1 -= x0
+                x0 = 0
+            if y0 < 0:
+                y1 -= y0
+                y0 = 0
+            if x1 > img.width:
+                x0 -= (x1 - img.width)
+                x1 = img.width
+            if y1 > img.height:
+                y0 -= (y1 - img.height)
+                y1 = img.height
+            x0 = max(0, x0)
+            y0 = max(0, y0)
+            x1 = min(img.width, max(x0 + 1, x1))
+            y1 = min(img.height, max(y0 + 1, y1))
+
+            img = img.crop((x0, y0, x1, y1))
+            if img.size != (cw, ch):
+                if img.width >= cw and img.height >= ch:
+                    img = img.crop((0, 0, cw, ch))
+                else:
+                    canvas = Image.new("RGBA", (cw, ch), (0, 0, 0, 0))
+                    canvas.paste(img, (0, 0))
+                    img = canvas
 
         if self.use_bg_var.get() and len(self.animation_frames) > 0:
             try:
@@ -2740,13 +2923,23 @@ class ImageSlicerApp:
             bg_path = self.animation_frames[self.animation_frame_order[bg_idx - 1]]
             try:
                 background = Image.open(bg_path).convert("RGBA")
-                if self.stabilize_var.get() and self.stabilize_cache.get("crop_centers") and (bg_idx - 1) < len(self.stabilize_cache["crop_centers"]):
-                    bg_cx, bg_cy = self.stabilize_cache["crop_centers"][bg_idx - 1]
+                if self.stabilize_var.get() and self.stabilize_cache.get("crop_centers"):
+                    bg_centers = self.stabilize_cache.get("crop_centers_by_path", {})
+                    if bg_path in bg_centers:
+                        bg_cx, bg_cy = bg_centers[bg_path]
+                    elif (bg_idx - 1) < len(self.stabilize_cache["crop_centers"]):
+                        bg_cx, bg_cy = self.stabilize_cache["crop_centers"][bg_idx - 1]
+                    else:
+                        bg_cx, bg_cy = background.width / 2.0, background.height / 2.0
                     bg_cw = self.stabilize_cache.get("current_w", background.width)
                     bg_ch = self.stabilize_cache.get("current_h", background.height)
                     bg_x0 = int(round(bg_cx - bg_cw / 2.0))
                     bg_y0 = int(round(bg_cy - bg_ch / 2.0))
                     background = background.crop((max(0, bg_x0), max(0, bg_y0), min(background.width, bg_x0 + bg_cw), min(background.height, bg_y0 + bg_ch)))
+                    if background.size != (bg_cw, bg_ch):
+                        bg_canvas = Image.new("RGBA", (bg_cw, bg_ch), (0, 0, 0, 0))
+                        bg_canvas.paste(background, (0, 0))
+                        background = bg_canvas
                 bg_w, bg_h = background.size
                 composite = background.copy()
                 bx = (bg_w - img.width) // 2
@@ -3198,6 +3391,12 @@ class ImageSlicerApp:
             self.timeline_frame.grid_remove()
             self.bottom_bar.grid_remove()
             self.update_preview()
+
+        if hasattr(self, "scroll_canvas"):
+            self.root.update_idletasks()
+            self.scroll_canvas.configure(scrollregion=self.scroll_canvas.bbox("all"))
+            self.scroll_canvas.yview_moveto(0)
+
 
     def delete_selected_frame(self):
         sel = self.frame_listbox.curselection()
